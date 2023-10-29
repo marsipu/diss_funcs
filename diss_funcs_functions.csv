@@ -1,0 +1,4 @@
+;alias;target;tab;group;matplotlib;mayavi;dependencies;module;pkg_name;func_args
+plot_gfp_stacked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group,show_plots,save_plots
+plot_gfp_group_stacked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,show_plots,save_plots
+plot_ltc_group_stacked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct, target_labels, show_plots, save_plots
