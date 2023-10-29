@@ -1,1 +1,22 @@
 ;alias;group;default;unit;description;gui_type;gui_args
+label_combinations;;Diss;{};;Label combinations with list of label-names as value;DictGui;
+n_eeg_channels;;Diss;64;;How many EEG-Channels were digitized;IntGui;
+eeg_dig_first;;Diss;True;;Did the EEG-Channels were digitized before or after the individual digitization points?;BoolGui;
+eog_tuple;;Diss;['EEG 032', 'EEG 042'];;Two EEG-Channels to make a bipolar-channel;ListGui;
+diff_window;;Diss;1000;;The size of the window (for each side) for the rolling-difference;IntGui;{'max_val': 10000}
+min_ev_distance;;Diss;2000;;The minimal distance for events to be recognized by Peak-Detection;IntGui;{'max_val': 10000}
+max_ev_distance;;Diss;4000;;The maximum distance for to be seen as joint (Up/Down);IntGui;{'max_val': 10000}
+regression_range;;Diss;(10, 300);;The range around the diff (for each side) to look for the best regression-range;TupleGui;{'min_val': 2, 'step': 1}
+regression_degree;;Diss;3;;The n-th degree polynomial to fit with linear Regression;IntGui;{'min_val': 1}
+len_baseline;;Diss;700;;Length of the baseline spanning from min_ev_distance before the rd-peak;IntGui;{'max_val': 10000}
+trig_plt_time;;Diss;(-0.5, 0.5);;time for plotting the load-cell-data;TupleGui;
+baseline_limit;;Diss;100;;The distance from the middle of the slope to the beginning of the baseline (avoid having the slope inside the baseline);IntGui;
+apply_savgol;;Diss;False;;;BoolGui;
+meta_queries;;Diss;{};;;DictGui;
+target_event_id;;Diss;1;;;IntGui;
+trig_channel;;Diss;EEG 001;;Select the Load-Cell-Trigger-Channel;StringGui;
+wav_input_type;;Diss;Raw;;;ComboGui;{'options': ['Raw', 'Evoked']}
+samplerate;;Diss;16000;;;IntGui;{'max_val': 1000000}
+fixed_id;;Diss;1;;;IntGui;
+fixed_duration;;Diss;5;;;IntGui;
+eogecg_target;;Diss;Raw (Unfiltered);;;ComboGui;{'options': ['Raw (Unfiltered)', 'Raw (Filtered)']}
