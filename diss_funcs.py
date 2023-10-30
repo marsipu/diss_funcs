@@ -6,9 +6,11 @@ import mne
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+from matplotlib.ticker import FuncFormatter
 from mne.stats import permutation_cluster_test, permutation_cluster_1samp_test
 from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
 from mne_pipeline_hd.pipeline.loading import Group, MEEG
+from quantiphy import Quantity
 from scipy.signal import find_peaks, savgol_filter
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
@@ -679,18 +681,19 @@ def plot_ratings_evoked_comparision(group, show_plots, n_jobs):
         hr_data = list()
         for key, value in gfp_hr.items():
             hr_data.append(value[ch_type])
-        X = [np.asarray(lr_data), np.asarray(hr_data)]
+        group_data = [np.asarray(hr_data), np.asarray(lr_data)]
         _plot_permutation_cluster_test(
-            X,
+            group_data,
             times,
             ["GFP: Rating < Durchschnitt", "GFP: Rating > Durchschnitt"],
-            show_plots,
+            one_sample=True,
+            show_plots=show_plots,
             n_jobs=n_jobs,
             threshold=None,
         )
         plt.title(f"{group.name}: Ratings")
-        plt.xlabel("Zeit (ms)")
-        plt.ylabel("F-Werte")
+        plt.xlabel("Zeit (s)")
+        plt.ylabel("Feldstärke (A/m)")
         group.plot_save("compare_ratings", trial=ch_type)
 
 
@@ -823,7 +826,7 @@ def plot_ltc_group_stacked(ct, target_labels, show_plots, save_plots):
 # Plots (statistics)
 ##############################################################
 def _plot_permutation_cluster_test(
-    X,
+    group_data,
     times,
     group_names,
     one_sample=False,
@@ -832,12 +835,21 @@ def _plot_permutation_cluster_test(
     threshold=None,
     tail=0,
     n_jobs=-1,
+    unit="A/m"
 ):
     # Compute permutation cluster test
     if one_sample:
-        perm_func = permutation_cluster_test
-    else:
+        if len(group_data) > 2:
+            raise ValueError(
+                "Only one or two group(s) allowed for one-sample test. (For two groups the difference is tested."
+            )
+        elif len(group_data) == 2:
+            X = group_data[0] - group_data[1]
+        else:
+            X = group_data[0]
         perm_func = permutation_cluster_1samp_test
+    else:
+        perm_func = permutation_cluster_test
     T_obs, clusters, cluster_p_values, H0 = perm_func(
         X,
         n_permutations=n_permutations,
@@ -847,12 +859,12 @@ def _plot_permutation_cluster_test(
         out_type="mask",
         seed=8,
     )
-
-    plt.figure(figsize=(8, 4))
-    for group_idx, group_name in enumerate(group_names):
-        plt.plot(
+    # Plot
+    fig, ax = plt.subplots(figsize=(8, 4))
+    for data, group_name in zip(group_data, group_names):
+        ax.plot(
             times,
-            np.mean(X[group_idx], axis=0),
+            np.mean(data, axis=0),
             label=group_name,
         )
 
@@ -860,7 +872,7 @@ def _plot_permutation_cluster_test(
         c = c[0]
         cpval = cluster_p_values[i_c]
         if cpval <= 0.05:
-            plt.axvspan(
+            ax.axvspan(
                 times[c.start],
                 times[c.stop - 1],
                 color="r",
@@ -868,13 +880,17 @@ def _plot_permutation_cluster_test(
                 label=f"p_val = {cpval:.3f}",
             )
         # else:
-        #     plt.axvspan(
+        #     ax.axvspan(
         #         times[c.start],
         #         times[c.stop - 1],
         #         color=(0.3, 0.3, 0.3),
         #         alpha=0.3,
         #     )
-    plt.legend()
+    # Set readable yticks
+    yformatter = FuncFormatter(lambda v, p: str(Quantity(v, "A/m")))
+    ax.yaxis.set_major_formatter(yformatter)
+    if not one_sample:
+        plt.legend()
     if show_plots:
         plt.show()
 
