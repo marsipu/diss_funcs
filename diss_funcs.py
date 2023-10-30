@@ -5,9 +5,10 @@ import mne
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+from mne.stats import permutation_cluster_test
 from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
-from mne_pipeline_hd.pipeline.loading import Group
-from scipy.signal import find_peaks
+from mne_pipeline_hd.pipeline.loading import Group, MEEG
+from scipy.signal import find_peaks, savgol_filter
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 
@@ -15,6 +16,7 @@ from sklearn.preprocessing import PolynomialFeatures
 ##############################################################
 # Preparation
 ##############################################################
+
 
 def combine_labels(fsmri, label_combinations):
     for new_label_name, label_names in label_combinations.items():
@@ -24,8 +26,11 @@ def combine_labels(fsmri, label_combinations):
             new_label += labels[i]
         new_label.name = new_label_name
         # Overwrites per default
-        new_label.save(join(fsmri.subjects_dir, fsmri.name, "label", f"{new_label_name}.label"))
+        new_label.save(
+            join(fsmri.subjects_dir, fsmri.name, "label", f"{new_label_name}.label")
+        )
         print(f"Created new label: {new_label_name}")
+
 
 def change_trig_channel_type(meeg, trig_channel):
     raw = meeg.load_raw()
@@ -141,6 +146,7 @@ def get_dig_eegs(meeg, n_eeg_channels, eeg_dig_first=True):
 
     meeg.save_raw(raw)
 
+
 ##############################################################
 # Ratings
 ##############################################################
@@ -188,6 +194,7 @@ def get_ratings(meeg, target_event_id):
 
     rating_meta_pd.to_csv(file_path)
 
+
 def _add_events_meta(epochs, meta_pd):
     """Make sure, that meat-data is assigned to correct epoch
     (requires parameter "time" and "id" to be included in meta_pd)
@@ -199,11 +206,16 @@ def _add_events_meta(epochs, meta_pd):
 
     metatimes = [int(t) for t in meta_pd_filtered["time"]]
 
-    # Add missing values
+    # Add missing values as NaN
     for miss_ix in np.nonzero(np.isin(epochs.events[:, 0], metatimes, invert=True))[0]:
         miss_time, miss_id = epochs.events[miss_ix, [0, 2]]
         meta_pd_filtered = pd.concat(
-            [meta_pd_filtered, pd.Series({"time": miss_time, "id": miss_id})],
+            [
+                meta_pd_filtered,
+                pd.Series({"time": miss_time, "id": miss_id, "rating": np.nan})
+                .to_frame()
+                .T,
+            ],
             axis=0,
             ignore_index=True,
         )
@@ -214,14 +226,13 @@ def _add_events_meta(epochs, meta_pd):
 
     # Integrate into existing metadata
     if isinstance(epochs.metadata, pd.DataFrame):
-        meta_pd_filtered = pd.merge(
-            epochs.metadata, meta_pd_filtered, how="inner", on=["time", "id"]
-        )
+        meta_pd_filtered = pd.merge(epochs.metadata, meta_pd_filtered, how="inner")
 
     if len(meta_pd_filtered) > 0:
         epochs.metadata = meta_pd_filtered
     else:
         raise RuntimeWarning("No metadata fits to this epochs!")
+
 
 def add_ratings_meta(meeg):
     epochs = meeg.load_epochs()
@@ -233,44 +244,28 @@ def add_ratings_meta(meeg):
     meeg.save_epochs(epochs)
 
 
-def select_events_meta(meeg, meta_queries):
-    epochs = meeg.load_epochs()
-    try:
-        evokeds = meeg.load_evokeds()
-    except FileNotFoundError:
-        evokeds = list()
-
-    for name, mq in meta_queries.items():
-        evoked = epochs[mq].average()
-        evoked.comment = name
-        # Add name to sel_trials to allow later processing in functions relying on sel_trials
-        meeg.sel_trials.append(name)
-        evokeds.append(evoked)
-
-    meeg.save_evokeds(evokeds)
-
-
 def remove_metadata(meeg):
     epochs = meeg.load_epochs()
     epochs.metadata = None
     meeg.save_epochs(epochs)
 
+
 ##############################################################
 # Load-Cell
 ##############################################################
 def get_load_cell_events_regression_baseline(
-        meeg,
-        min_duration,
-        shortest_event,
-        adjust_timeline_by_msec,
-        diff_window,
-        min_ev_distance,
-        max_ev_distance,
-        len_baseline,
-        baseline_limit,
-        regression_degree,
-        trig_channel,
-        n_jobs,
+    meeg,
+    min_duration,
+    shortest_event,
+    adjust_timeline_by_msec,
+    diff_window,
+    min_ev_distance,
+    max_ev_distance,
+    len_baseline,
+    baseline_limit,
+    regression_degree,
+    trig_channel,
+    n_jobs,
 ):
     # Load Raw and extract the load-cell-trigger-channel
     raw = meeg.load_raw()
@@ -341,13 +336,13 @@ def get_load_cell_events_regression_baseline(
         # Get Trigger-Time by finding the first samples going from peak crossing the baseline
         # (from baseline_limit with length=len_baseline)
         pre_baseline_mean = np.asarray(
-            eeg_series[pk - (len_baseline + baseline_limit): pk - baseline_limit + 1]
+            eeg_series[pk - (len_baseline + baseline_limit) : pk - baseline_limit + 1]
         ).mean()
         post_baseline_mean = np.asarray(
-            eeg_series[pk + baseline_limit: pk + baseline_limit + len_baseline + 1]
+            eeg_series[pk + baseline_limit : pk + baseline_limit + len_baseline + 1]
         ).mean()
-        pre_peak_data = np.flip(np.asarray(eeg_series[pk - min_ev_distance: pk + 1]))
-        post_peak_data = np.asarray(eeg_series[pk: pk + min_ev_distance + 1])
+        pre_peak_data = np.flip(np.asarray(eeg_series[pk - min_ev_distance : pk + 1]))
+        post_peak_data = np.asarray(eeg_series[pk : pk + min_ev_distance + 1])
         if pre_baseline_mean > post_baseline_mean:
             first_idx = pk - (pre_peak_data > pre_baseline_mean).argmax()
             last_idx = pk + (post_peak_data < post_baseline_mean).argmax()
@@ -399,8 +394,8 @@ def get_load_cell_events_regression_baseline(
             event_id_last = 9
 
         for timep, evid in zip(
-                [first_time, peak_time, last_time],
-                [event_id_first, event_id_middle, event_id_last],
+            [first_time, peak_time, last_time],
+            [event_id_first, event_id_middle, event_id_last],
         ):
             meta_dict = {
                 "time": timep,
@@ -480,10 +475,10 @@ def get_load_cell_events_regression_baseline(
             if idx == len(events_meta_dict) - 1:
                 # Fill the time before and after the last event
                 first_fill_time = first_time - (
-                        events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
+                    events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
                 )
                 last_fill_time = eeg_raw.n_times - (
-                        events_meta_dict[ev_idx]["last_time"] - eeg_raw.first_samp
+                    events_meta_dict[ev_idx]["last_time"] - eeg_raw.first_samp
                 )
                 reg_signal = np.concatenate(
                     [
@@ -496,7 +491,7 @@ def get_load_cell_events_regression_baseline(
             else:
                 # Fill the time between events
                 fill_time = first_time - (
-                        events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
+                    events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
                 )
                 reg_signal = np.concatenate(
                     [reg_signal, np.full(fill_time, best_y[0]), best_y]
@@ -515,6 +510,7 @@ def get_load_cell_events_regression_baseline(
         meeg.save_dir, f"{meeg.name}_{meeg.p_preset}_loadcell-regression-raw.fif"
     )
     reg_raw.save(reg_raw_path, overwrite=True)
+
 
 def _get_load_cell_epochs(
     meeg,
@@ -575,9 +571,53 @@ def _get_load_cell_epochs(
 
 
 ##############################################################
-# Plots
+# Plots (descriptive)
 ##############################################################
-def plot_ratings_comparision(group, show_plots):
+def _mean_of_different_lengths(data):
+    arr = np.ma.empty((len(data), max([len(d) for d in data])))
+    arr.mask = True
+    for idx, d in enumerate(data):
+        arr[idx, : len(d)] = d
+
+    return np.mean(arr, axis=0), np.std(arr, axis=0)
+
+
+def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
+    fig, ax = plt.subplots(len(rating_groups), 1, sharex=True, sharey=True)
+    for idx, (group_title, group_names) in enumerate(rating_groups.items()):
+        for group_name in group_names:
+            group = Group(group_name, ct)
+            group_ratings = list()
+            for meeg in group.load_items(obj_type="MEEG", data_type=None):
+                file_name = "ratings_meta"
+                file_path = join(
+                    meeg.save_dir, f"{meeg.name}_{meeg.p_preset}_{file_name}.csv"
+                )
+                ratings_pd = pd.read_csv(file_path, index_col=0)
+                ratings = ratings_pd["rating"].values
+                group_ratings.append(ratings)
+            group_mean, group_std = _mean_of_different_lengths(group_ratings)
+            ax[idx].plot(group_mean, color=group_colors[group_name], alpha=1, label=group_name)
+            ax[idx].fill_between(
+                x=np.arange(len(group_mean)),
+                y1=group_mean - group_std,
+                y2=group_mean + group_std,
+                alpha=0.5,
+                color=group_colors[group_name],
+            )
+        ax[idx].set_xlabel("Epochs")
+        ax[idx].set_ylabel("Rating")
+        ax[idx].legend()
+        ax[idx].set_title(group_title)
+        # Hide inner labels
+        ax[idx].label_outer()
+    Group("all", ct).plot_save("ratings_combined")
+
+    if show_plots:
+        fig.show()
+
+
+def plot_ratings_evoked_comparision(group, show_plots):
     evokeds_lr = list()
     evokeds_hr = list()
 
@@ -607,26 +647,39 @@ def plot_ratings_comparision(group, show_plots):
 
 
 def plot_load_cell_group_ave(
-    ct, trig_plt_time, baseline_limit, show_plots, apply_savgol, trig_channel,
+    ct,
+    trig_plt_time,
+    baseline_limit,
+    show_plots,
+    apply_savgol,
+    trig_channel,
+    group_colors,
 ):
     fig, ax = plt.subplots(len(ct.pr.sel_groups), 1, sharey=True, sharex=True)
     if not isinstance(ax, np.ndarray):
         ax = [ax]
 
-    cmap = plt.cm.get_cmap("hsv", len(ct.pr.all_groups[ct.pr.sel_groups[0]]) + 1)
     for idx, group_name in enumerate(ct.pr.sel_groups):
         group = Group(group_name, ct)
-        for color_idx, meeg_name in enumerate(group.group_list):
+        for meeg_name in group.group_list:
             meeg = MEEG(meeg_name, group.ct)
             epochs_dict, times = _get_load_cell_epochs(
-                meeg, trig_plt_time, baseline_limit, trig_channel, apply_savgol,
+                meeg,
+                trig_plt_time,
+                baseline_limit,
+                trig_channel,
+                apply_savgol,
             )
-            color = cmap(color_idx)
             epo_data = list()
             for epd in epochs_dict["Down"]:
                 epo_data.append(epd)
+                ax[idx].plot(
+                    times, epd, color=group_colors.get(group_name, "k"), alpha=0.5
+                )
             epo_mean = np.mean(epo_data, axis=0)
-            ax[idx].plot(times, epo_mean, color=color, alpha=0.5)
+            ax[idx].plot(
+                times, epo_mean, color=group_colors.get(group_name, "k"), alpha=1
+            )
             half_idx = int(len(epd) / 2) + 1
             ax[idx].plot(0, epd[half_idx], "xr")
 
@@ -716,3 +769,130 @@ def plot_ltc_group_stacked(ct, target_labels, show_plots, save_plots):
             ),
             dpi=600,
         )
+
+
+##############################################################
+# Plots (statistics)
+##############################################################
+def _plot_permutation_cluster_test(X, times, group_names, n_jobs, show_plots):
+    T_obs, clusters, cluster_p_values, H0 = permutation_cluster_test(
+        X,
+        n_permutations=1000,
+        threshold=None,  # F-statistic with p-value=0.05
+        tail=1,
+        n_jobs=n_jobs,
+        out_type="mask",
+        seed=8,
+    )
+    # %%
+    # Plot
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 6))
+
+    for group_idx, group_name in enumerate(group_names):
+        ax1.plot(
+            times,
+            np.mean(X[group_idx], axis=0),
+            label=group_name,
+        )
+    ax1.set_title("GFP")
+    ax1.legend()
+
+    ax2.set_title(f"GFP-Difference {group_names[0]} - {group_names[1]}")
+    ax2.plot(
+        times,
+        np.mean(X[0], axis=0) - np.mean(X[1], axis=0),
+    )
+
+    for i_c, c in enumerate(clusters):
+        c = c[0]
+        cpval = cluster_p_values[i_c]
+        if cpval <= 0.05:
+            ax3.axvspan(
+                times[c.start],
+                times[c.stop - 1],
+                color="r",
+                alpha=0.3,
+                label=f"p_val = {cpval:.3f}",
+            )
+        else:
+            ax3.axvspan(
+                times[c.start],
+                times[c.stop - 1],
+                color=(0.3, 0.3, 0.3),
+                alpha=0.3,
+            )
+    ax3.legend()
+    ax3.set_title("Test Statistic")
+    ax3.plot(times, T_obs, "g")
+    ax3.set_xlabel("time (ms)")
+    ax3.set_ylabel("f-values")
+    plt.tight_layout()
+    if show_plots:
+        plt.show()
+
+
+def evoked_temporal_cluster(ct, compare_groups, cluster_trial, n_jobs, show_plots):
+    import numpy as np
+    from mne_pipeline_hd.pipeline.loading import Group
+    from mne_pipeline_hd.functions.operations import calculate_gfp
+
+    for group_names in compare_groups:
+        X = list()
+        for group_name in group_names:
+            group = Group(group_name, ct)
+            trial = cluster_trial.get(group_name)
+            group_data = list()
+            for evokeds, meeg in group.load_items(obj_type="MEEG", data_type="evoked"):
+                try:
+                    evoked = [ev for ev in evokeds if ev.comment == trial][0]
+                except IndexError:
+                    print(f"No evoked for {trial} in {meeg.name}")
+                else:
+                    times = evoked.times
+                    gfp = calculate_gfp(evoked)["grad"]
+                    # Apply bandpass filter 1-30 Hz
+                    gfp = mne.filter.filter_data(gfp, 1000, 1, 30)
+                    group_data.append(gfp)
+            X.append(np.asarray(group_data))
+
+        _plot_permutation_cluster_test(X, times, group_names, n_jobs, show_plots)
+
+        group.plot_save(
+            "evoked_cluster_f_test",
+            trial=" vs ".join(group_names),
+        )
+
+
+def ltc_temporal_cluster(
+    ct, compare_groups, target_labels, cluster_trial, n_jobs, show_plots
+):
+    for group_names in compare_groups:
+        label_X = list()
+        for group_name in group_names:
+            group = Group(group_name, ct)
+            trial = cluster_trial[group_name]
+            group_data = {lb_name: list() for lb_name in target_labels}
+            for ltcs, meeg in group.load_items(obj_type="MEEG", data_type="ltc"):
+                ltcs = ltcs[trial]
+                for label_name, ltc in ltcs.items():
+                    # Assumes times is everywhere the same
+                    times = ltc[1]
+                    # Apply bandpass filter 1-30 Hz
+                    ltc_data = mne.filter.filter_data(ltc[0], 1000, 1, 30)
+                    group_data[label_name].append(ltc_data)
+            label_X.append(group_data)
+
+        for label_name in target_labels:
+            X = list()
+            for data in label_X:
+                label_data = data[label_name]
+                X.append(np.asarray(label_data))
+
+            _plot_permutation_cluster_test(X, times, group_names, n_jobs, show_plots)
+
+            group.plot_save(
+                "ltc_cluster_f_test",
+                subfolder=label_name,
+                matplotlib_figure=fig,
+                trial=" vs ".join(group_names),
+            )

@@ -11,5 +11,8 @@ get_load_cell_events_regression_baseline;;MEEG;Compute;Diss;False;False;;diss_fu
 plot_gfp_stacked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group,show_plots,save_plots
 plot_gfp_group_stacked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,show_plots,save_plots
 plot_ltc_group_stacked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,target_labels,show_plots,save_plots
-plot_ratings_comparision;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group, show_plots
+plot_ratings_evoked_comparision;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group, show_plots
 plot_load_cell_group_ave;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,trig_plt_time,baseline_limit,show_plots,apply_savgol,trig_channel
+plot_ratings_combined;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,show_plots
+evoked_temporal_cluster;;Other;Plot;Diss;True;False;;pp1_diss;pp1_diss;ct,rating_groups,compare_groups,cluster_trial,n_jobs,show_plots
+ltc_temporal_cluster;;Other;Plot;Diss;True;False;;pp1_diss;pp1_diss;ct,compare_groups,target_labels,cluster_trial,n_jobs,show_plots
