@@ -1,11 +1,12 @@
 import sys
+from collections import OrderedDict
 from os.path import join
 
 import mne
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-from mne.stats import permutation_cluster_test
+from mne.stats import permutation_cluster_test, permutation_cluster_1samp_test
 from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
 from mne_pipeline_hd.pipeline.loading import Group, MEEG
 from scipy.signal import find_peaks, savgol_filter
@@ -597,7 +598,9 @@ def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
                 ratings = ratings_pd["rating"].values
                 group_ratings.append(ratings)
             group_mean, group_std = _mean_of_different_lengths(group_ratings)
-            ax[idx].plot(group_mean, color=group_colors[group_name], alpha=1, label=group_name)
+            ax[idx].plot(
+                group_mean, color=group_colors[group_name], alpha=1, label=group_name
+            )
             ax[idx].fill_between(
                 x=np.arange(len(group_mean)),
                 y1=group_mean - group_std,
@@ -617,33 +620,78 @@ def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
         fig.show()
 
 
-def plot_ratings_evoked_comparision(group, show_plots):
-    evokeds_lr = list()
-    evokeds_hr = list()
+def _merge_measurements(data_dict):
+    # Find pairs of measurments from Experiment 1
+    new_data_dict = OrderedDict()
+    keys = np.asarray(list(data_dict.keys()))
+    reduced_keys = np.asarray([k[:-2] for k in data_dict.keys()])
+    unique_keys = np.unique(reduced_keys)
+    for uk in unique_keys:
+        data_keys = keys[np.argwhere(reduced_keys == uk).flatten()]
+        data_list = list()
+        for dk in data_keys:
+            data_list.append(data_dict[dk])
+        # Take mean if data is of numpy-arrays
+        if isinstance(data_list[0], np.ndarray):
+            new_data_dict[uk] = np.mean(data_list, axis=0)
+        # Preserve dictionary with one level (e.g. channel-types or labels)
+        elif isinstance(data_list[0], dict):
+            new_data_dict[uk] = dict()
+            datas = dict()
+            for data in data_list:
+                for key, value in data.items():
+                    if key in datas:
+                        datas[key].append(value)
+                    else:
+                        datas[key] = [value]
+            for key, value in datas.items():
+                new_data_dict[uk][key] = np.mean(value, axis=0)
+
+    return new_data_dict
+
+
+def plot_ratings_evoked_comparision(group, show_plots, n_jobs):
+    gfp_lr = OrderedDict()
+    gfp_hr = OrderedDict()
 
     for epochs, meeg in group.load_items(obj_type="MEEG", data_type="epochs"):
+        # Assuming times is the same for all measurements
+        times = epochs.times
         try:
             ratings_mean = np.mean(epochs.metadata["rating"])
         except (KeyError, TypeError):
             print(f"{meeg.name} could not be included due to reasons")
         else:
-            evoked_lr = epochs[f"rating < {ratings_mean}"].average()
-            evoked_lr.comment = "Lower Ratings"
-            evoked_hr = epochs[f"rating > {ratings_mean}"].average()
-            evoked_hr.comment = "Higher Ratings"
-
-            evokeds_lr.append(evoked_lr)
-            evokeds_hr.append(evoked_hr)
-
-    ga_lr = mne.grand_average(evokeds_lr)
-    ga_lr.comment = "Lower Ratings"
-    ga_hr = mne.grand_average(evokeds_hr)
-    ga_hr.comment = "Higher Ratings"
-
-    fig = mne.viz.plot_compare_evokeds(
-        [ga_lr, ga_hr], title=group.name, show=show_plots
-    )
-    group.plot_save("compare_ratings", matplotlib_figure=fig)
+            # Calculate GFP diff lower and higher ratings
+            gfp_lr[meeg.name] = calculate_gfp(
+                epochs[f"rating < {ratings_mean}"].average()
+            )
+            gfp_hr[meeg.name] = calculate_gfp(
+                epochs[f"rating > {ratings_mean}"].average()
+            )
+    ch_types = gfp_lr[list(gfp_lr.keys())[0]]
+    gfp_lr = _merge_measurements(gfp_lr)
+    gfp_hr = _merge_measurements(gfp_hr)
+    for ch_type in ch_types:
+        lr_data = list()
+        for key, value in gfp_lr.items():
+            lr_data.append(value[ch_type])
+        hr_data = list()
+        for key, value in gfp_hr.items():
+            hr_data.append(value[ch_type])
+        X = [np.asarray(lr_data), np.asarray(hr_data)]
+        _plot_permutation_cluster_test(
+            X,
+            times,
+            ["GFP: Rating < Durchschnitt", "GFP: Rating > Durchschnitt"],
+            show_plots,
+            n_jobs=n_jobs,
+            threshold=None,
+        )
+        plt.title(f"{group.name}: Ratings")
+        plt.xlabel("Zeit (ms)")
+        plt.ylabel("F-Werte")
+        group.plot_save("compare_ratings", trial=ch_type)
 
 
 def plot_load_cell_group_ave(
@@ -774,59 +822,59 @@ def plot_ltc_group_stacked(ct, target_labels, show_plots, save_plots):
 ##############################################################
 # Plots (statistics)
 ##############################################################
-def _plot_permutation_cluster_test(X, times, group_names, n_jobs, show_plots):
-    T_obs, clusters, cluster_p_values, H0 = permutation_cluster_test(
+def _plot_permutation_cluster_test(
+    X,
+    times,
+    group_names,
+    one_sample=False,
+    show_plots=True,
+    n_permutations=1000,
+    threshold=None,
+    tail=0,
+    n_jobs=-1,
+):
+    # Compute permutation cluster test
+    if one_sample:
+        perm_func = permutation_cluster_test
+    else:
+        perm_func = permutation_cluster_1samp_test
+    T_obs, clusters, cluster_p_values, H0 = perm_func(
         X,
-        n_permutations=1000,
-        threshold=None,  # F-statistic with p-value=0.05
-        tail=1,
+        n_permutations=n_permutations,
+        threshold=threshold,  # F-statistic with p-value=0.05
+        tail=tail,
         n_jobs=n_jobs,
         out_type="mask",
         seed=8,
     )
-    # %%
-    # Plot
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 6))
 
+    plt.figure(figsize=(8, 4))
     for group_idx, group_name in enumerate(group_names):
-        ax1.plot(
+        plt.plot(
             times,
             np.mean(X[group_idx], axis=0),
             label=group_name,
         )
-    ax1.set_title("GFP")
-    ax1.legend()
-
-    ax2.set_title(f"GFP-Difference {group_names[0]} - {group_names[1]}")
-    ax2.plot(
-        times,
-        np.mean(X[0], axis=0) - np.mean(X[1], axis=0),
-    )
 
     for i_c, c in enumerate(clusters):
         c = c[0]
         cpval = cluster_p_values[i_c]
         if cpval <= 0.05:
-            ax3.axvspan(
+            plt.axvspan(
                 times[c.start],
                 times[c.stop - 1],
                 color="r",
                 alpha=0.3,
                 label=f"p_val = {cpval:.3f}",
             )
-        else:
-            ax3.axvspan(
-                times[c.start],
-                times[c.stop - 1],
-                color=(0.3, 0.3, 0.3),
-                alpha=0.3,
-            )
-    ax3.legend()
-    ax3.set_title("Test Statistic")
-    ax3.plot(times, T_obs, "g")
-    ax3.set_xlabel("time (ms)")
-    ax3.set_ylabel("f-values")
-    plt.tight_layout()
+        # else:
+        #     plt.axvspan(
+        #         times[c.start],
+        #         times[c.stop - 1],
+        #         color=(0.3, 0.3, 0.3),
+        #         alpha=0.3,
+        #     )
+    plt.legend()
     if show_plots:
         plt.show()
 
@@ -855,7 +903,7 @@ def evoked_temporal_cluster(ct, compare_groups, cluster_trial, n_jobs, show_plot
                     group_data.append(gfp)
             X.append(np.asarray(group_data))
 
-        _plot_permutation_cluster_test(X, times, group_names, n_jobs, show_plots)
+        _plot_permutation_cluster_test(X, times, group_names, show_plots, n_jobs=n_jobs)
 
         group.plot_save(
             "evoked_cluster_f_test",
@@ -893,6 +941,5 @@ def ltc_temporal_cluster(
             group.plot_save(
                 "ltc_cluster_f_test",
                 subfolder=label_name,
-                matplotlib_figure=fig,
                 trial=" vs ".join(group_names),
             )
