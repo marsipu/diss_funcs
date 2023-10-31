@@ -1,6 +1,7 @@
 ;alias;group;default;unit;description;gui_type;gui_args
 compare_groups;;Diss;[];;;ListGui;
 rating_groups;;Diss;{};;;DictGui;
+meta_queries;;Diss;{};;;DictGui;
 group_colors;;Diss;{};;Select colors for group-names;ColorGui;{'keys': ['Laser', 'High', 'Low', 'Middle', 'Tactile']}
 label_combinations;;Diss;{};;Label combinations with list of label-names as value;DictGui;
 n_eeg_channels;;Diss;64;;How many EEG-Channels were digitized;IntGui;
@@ -24,3 +25,4 @@ copy_data_type;;Diss;'';;;StringGui;
 home_from;;Diss;'';;;PathGui;{"pick_mode": "directory"}
 project_from;;Diss;'';;;StringGui;
 notch_frequencies;;Diss;50;;;FuncGui;
+eogecg_target;;Preparation;Raw (Unfiltered);;;ComboGui;{'options': ['Raw (Unfiltered)', 'Raw (Filtered)']}

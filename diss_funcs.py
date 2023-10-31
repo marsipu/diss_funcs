@@ -1,3 +1,5 @@
+import itertools
+import logging
 import sys
 from collections import OrderedDict
 from os.path import join
@@ -149,6 +151,17 @@ def get_dig_eegs(meeg, n_eeg_channels, eeg_dig_first=True):
 
     meeg.save_raw(raw)
 
+def pl1_laser_event_correction(meeg):
+    if meeg.name != "pl1_laser2J":
+        print("Only for pl1_laser2J")
+        return
+    events = meeg.load_events()
+    # Change id from 11 to 32
+    events[events[:, 2] == 11, 2] = 32
+    # Determined 1142 ms mean latency between 32 and 11 from other laser-measurements
+    events[events[:, 2] == 32, 0] -= 1142
+    meeg.save_events(events)
+
 
 ##############################################################
 # Ratings
@@ -245,6 +258,32 @@ def add_ratings_meta(meeg):
 
     _add_events_meta(epochs, ratings_pd)
     meeg.save_epochs(epochs)
+
+
+def select_events_meta(meeg, meta_queries):
+    epochs = meeg.load_epochs()
+    try:
+        evokeds = meeg.load_evokeds()
+    except FileNotFoundError:
+        evokeds = list()
+
+    for name, mq in meta_queries.items():
+        # Remove old if there
+        for evoked in evokeds:
+            if evoked.comment == name:
+                evokeds.remove(evoked)
+                logging.debug(f"Replaced old {name}")
+        try:
+            mq = eval(mq)
+        except (NameError, SyntaxError, ValueError, TypeError):
+            pass
+        evoked = epochs[mq].average()
+        evoked.comment = name
+        # Add name to sel_trials to allow later processing in functions relying on sel_trials
+        meeg.sel_trials.append(name)
+        evokeds.append(evoked)
+
+    meeg.save_evokeds(evokeds)
 
 
 def remove_metadata(meeg):
@@ -627,74 +666,85 @@ def _merge_measurements(data_dict):
     new_data_dict = OrderedDict()
     keys = np.asarray(list(data_dict.keys()))
     reduced_keys = np.asarray([k[:-2] for k in data_dict.keys()])
-    unique_keys = np.unique(reduced_keys)
-    for uk in unique_keys:
+    unique_keys = np.unique(reduced_keys, return_counts=True)
+    for uk, cnt in unique_keys:
         data_keys = keys[np.argwhere(reduced_keys == uk).flatten()]
         data_list = list()
         for dk in data_keys:
             data_list.append(data_dict[dk])
-        # Take mean if data is of numpy-arrays
-        if isinstance(data_list[0], np.ndarray):
-            new_data_dict[uk] = np.mean(data_list, axis=0)
-        # Preserve dictionary with one level (e.g. channel-types or labels)
-        elif isinstance(data_list[0], dict):
-            new_data_dict[uk] = dict()
-            datas = dict()
-            for data in data_list:
-                for key, value in data.items():
-                    if key in datas:
-                        datas[key].append(value)
-                    else:
-                        datas[key] = [value]
-            for key, value in datas.items():
-                new_data_dict[uk][key] = np.mean(value, axis=0)
+        if len(data_list) == 1:
+            new_data_dict[dk] = data_dict[dk]
+        else:
+            # Take mean if data is of numpy-arrays
+            if isinstance(data_list[0], np.ndarray):
+                new_data_dict[uk] = np.mean(data_list, axis=0)
+            # Preserve dictionary with one level (e.g. channel-types or labels)
+            elif isinstance(data_list[0], dict):
+                new_data_dict[uk] = dict()
+                datas = dict()
+                for data in data_list:
+                    for key, value in data.items():
+                        if key in datas:
+                            datas[key].append(value)
+                        else:
+                            datas[key] = [value]
+                for key, value in datas.items():
+                    new_data_dict[uk][key] = np.mean(value, axis=0)
 
     return new_data_dict
 
 
-def plot_ratings_evoked_comparision(group, show_plots, n_jobs):
-    gfp_lr = OrderedDict()
-    gfp_hr = OrderedDict()
-
-    for epochs, meeg in group.load_items(obj_type="MEEG", data_type="epochs"):
-        # Assuming times is the same for all measurements
-        times = epochs.times
-        try:
-            ratings_mean = np.mean(epochs.metadata["rating"])
-        except (KeyError, TypeError):
-            print(f"{meeg.name} could not be included due to reasons")
-        else:
-            # Calculate GFP diff lower and higher ratings
-            gfp_lr[meeg.name] = calculate_gfp(
-                epochs[f"rating < {ratings_mean}"].average()
-            )
-            gfp_hr[meeg.name] = calculate_gfp(
-                epochs[f"rating > {ratings_mean}"].average()
-            )
-    ch_types = gfp_lr[list(gfp_lr.keys())[0]]
-    gfp_lr = _merge_measurements(gfp_lr)
-    gfp_hr = _merge_measurements(gfp_hr)
+def plot_ratings_evoked_comparision(ct, ch_types, meta_queries, show_plots, n_jobs):
     for ch_type in ch_types:
-        lr_data = list()
-        for key, value in gfp_lr.items():
-            lr_data.append(value[ch_type])
-        hr_data = list()
-        for key, value in gfp_hr.items():
-            hr_data.append(value[ch_type])
-        group_data = [np.asarray(hr_data), np.asarray(lr_data)]
-        _plot_permutation_cluster_test(
-            group_data,
-            times,
-            ["GFP: Rating < Durchschnitt", "GFP: Rating > Durchschnitt"],
-            one_sample=True,
-            show_plots=show_plots,
-            n_jobs=n_jobs,
-            threshold=None,
-        )
-        plt.title(f"{group.name}: Ratings")
-        plt.xlabel("Zeit (s)")
-        plt.ylabel("Feldstärke (A/m)")
-        group.plot_save("compare_ratings", trial=ch_type)
+        n_subplots = np.ceil(np.sqrt(len(ct.pr.sel_groups))).astype(int)
+        fig, ax = plt.subplots(nrows=n_subplots, ncols=n_subplots, sharex=True, sharey=True, figsize=(12, 6))
+        ax_idxs = itertools.product(range(n_subplots), repeat=2)
+        for group_name, ax_idx in zip(ct.pr.sel_groups, ax_idxs):
+            group = Group(group_name, ct)
+            gfps = dict()
+            for query_trial in meta_queries.keys():
+                gfps[query_trial] = dict()
+                for evokeds, meeg in group.load_items(obj_type="MEEG", data_type="evoked"):
+                    try:
+                        evoked = [ev for ev in evokeds if ev.comment == query_trial][0]
+                    except IndexError:
+                        raise RuntimeWarning(
+                            f"No evoked found from {meeg.name} for {query_trial}"
+                        )
+                    else:
+                        # Assuming times is the same for all measurements
+                        times = evoked.times
+                        gfp = calculate_gfp(evoked)
+                        gfps[query_trial][meeg.name] = gfp
+                gfps[query_trial] = _merge_measurements(gfps[query_trial])
+            group_data = list()
+            for query_trial in gfps:
+                query_list = list()
+                for key, value in gfps[query_trial].items():
+                    # Only use Gradiometer for now
+                    query_list.append(value[ch_type])
+                group_data.append(np.asarray(query_list))
+            _plot_permutation_cluster_test(
+                group_data,
+                times,
+                ["GFP: Rating < Durchschnitt", "GFP: Rating > Durchschnitt"],
+                one_sample=True,
+                show_plots=show_plots,
+                n_jobs=n_jobs,
+                threshold=None,
+                unit="A/m" if ch_type == "grad" else "V",
+                ax=ax[ax_idx]
+            )
+            ax[ax_idx].set_title(f'{group.name}')
+            ax[ax_idx].set_xlabel("Zeit (s)")
+            if ch_type == "grad":
+                ax[ax_idx].set_ylabel("magnetische Feldstärke (A/m)")
+            else:
+                ax[ax_idx].set_ylabel("elektrische Spannung (V)")
+            ax[ax_idx].label_outer()
+            ax[ax_idx].legend(loc="upper right", fontsize="small")
+        fig.suptitle(ct.pr.name)
+        Group(ct.pr.name, ct).plot_save("compare_ratings", trial=ch_type)
 
 
 def plot_load_cell_group_ave(
@@ -830,12 +880,13 @@ def _plot_permutation_cluster_test(
     times,
     group_names,
     one_sample=False,
-    show_plots=True,
+    show_plots=False,
     n_permutations=1000,
     threshold=None,
     tail=0,
     n_jobs=-1,
-    unit="A/m"
+    unit="A/m",
+    ax=None,
 ):
     # Compute permutation cluster test
     if one_sample:
@@ -860,14 +911,16 @@ def _plot_permutation_cluster_test(
         seed=8,
     )
     # Plot
-    fig, ax = plt.subplots(figsize=(8, 4))
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 4))
     for data, group_name in zip(group_data, group_names):
         ax.plot(
             times,
-            np.mean(data, axis=0),
+            np.nanmean(data, axis=0),
             label=group_name,
         )
 
+    s_counter = 0
     for i_c, c in enumerate(clusters):
         c = c[0]
         cpval = cluster_p_values[i_c]
@@ -877,8 +930,9 @@ def _plot_permutation_cluster_test(
                 times[c.stop - 1],
                 color="r",
                 alpha=0.3,
-                label=f"p_val = {cpval:.3f}",
+                label=f"p_val_{s_counter} = {cpval:.3f}",
             )
+            s_counter += 1
         # else:
         #     ax.axvspan(
         #         times[c.start],
@@ -887,10 +941,9 @@ def _plot_permutation_cluster_test(
         #         alpha=0.3,
         #     )
     # Set readable yticks
-    yformatter = FuncFormatter(lambda v, p: str(Quantity(v, "A/m")))
+    yformatter = FuncFormatter(lambda v, p: str(Quantity(v, unit)))
     ax.yaxis.set_major_formatter(yformatter)
-    if not one_sample:
-        plt.legend()
+    plt.legend()
     if show_plots:
         plt.show()
 
