@@ -1,3 +1,4 @@
+import gc
 import itertools
 import logging
 import sys
@@ -9,6 +10,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.ticker import FuncFormatter
+from mne.minimum_norm import source_induced_power
 from mne.stats import permutation_cluster_test, permutation_cluster_1samp_test
 from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
 from mne_pipeline_hd.pipeline.loading import Group, MEEG
@@ -17,6 +19,7 @@ from scipy.signal import find_peaks, savgol_filter
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 
+figsize = (9, 6)
 
 ##############################################################
 # Preparation
@@ -151,6 +154,7 @@ def get_dig_eegs(meeg, n_eeg_channels, eeg_dig_first=True):
 
     meeg.save_raw(raw)
 
+
 def pl1_laser_event_correction(meeg):
     if meeg.name != "pl1_laser2J":
         print("Only for pl1_laser2J")
@@ -207,7 +211,52 @@ def get_ratings(meeg, target_event_id):
                     axis=0,
                     ignore_index=True,
                 )
+    print(f"Ratings: {list(rating_meta_pd['rating'])}")
+    rating_meta_pd.to_csv(file_path)
 
+
+def get_ratings_laser(meeg, laser_target_event_id):
+    events = meeg.load_events()
+
+    file_name = "ratings_meta"
+    file_path = join(meeg.save_dir, f"{meeg.name}_{meeg.p_preset}_{file_name}.csv")
+    rating_meta_pd = pd.DataFrame([], columns=["time", "id", "rating"], dtype=int)
+
+    # Get Ratings from Triggers 10-19
+    pre_ratings = np.copy(
+        events[np.nonzero(np.logical_and(1 <= events[:, 2], events[:, 2] <= 10))]
+    )
+    first_idx = np.nonzero(np.diff(pre_ratings[:, 0], axis=0) < 200)[0]
+    last_idx = first_idx + 1
+    ratings = pre_ratings[first_idx]
+    ratings[:, 2] = (ratings[:, 2] % 10) * 10 + pre_ratings[last_idx][:, 2] % 10
+
+    # Get time sample from target_event_id
+    target_events = events[np.nonzero(events[:, 2] == laser_target_event_id)]
+    for rating in ratings:
+        # Get time from previous target_event_id
+        try:
+            rating_time = target_events[
+                np.nonzero(target_events[:, 0] - rating[0] < 0)
+            ][-1][0]
+        except IndexError:
+            pass
+        else:
+            # Make sure there are no duplicates (because of missing events)
+            if rating_time not in list(rating_meta_pd["time"]):
+                rating_value = rating[2]
+                rating_dict = {
+                    "time": rating_time,
+                    "id": laser_target_event_id,
+                    "rating": rating_value,
+                }
+                meta_series = pd.Series(rating_dict)
+                rating_meta_pd = pd.concat(
+                    [rating_meta_pd, meta_series.to_frame().T],
+                    axis=0,
+                    ignore_index=True,
+                )
+    print(f"Ratings: {list(rating_meta_pd['rating'])}")
     rating_meta_pd.to_csv(file_path)
 
 
@@ -258,32 +307,6 @@ def add_ratings_meta(meeg):
 
     _add_events_meta(epochs, ratings_pd)
     meeg.save_epochs(epochs)
-
-
-def select_events_meta(meeg, meta_queries):
-    epochs = meeg.load_epochs()
-    try:
-        evokeds = meeg.load_evokeds()
-    except FileNotFoundError:
-        evokeds = list()
-
-    for name, mq in meta_queries.items():
-        # Remove old if there
-        for evoked in evokeds:
-            if evoked.comment == name:
-                evokeds.remove(evoked)
-                logging.debug(f"Replaced old {name}")
-        try:
-            mq = eval(mq)
-        except (NameError, SyntaxError, ValueError, TypeError):
-            pass
-        evoked = epochs[mq].average()
-        evoked.comment = name
-        # Add name to sel_trials to allow later processing in functions relying on sel_trials
-        meeg.sel_trials.append(name)
-        evokeds.append(evoked)
-
-    meeg.save_evokeds(evokeds)
 
 
 def remove_metadata(meeg):
@@ -625,7 +648,9 @@ def _mean_of_different_lengths(data):
 
 
 def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
-    fig, ax = plt.subplots(len(rating_groups), 1, sharex=True, sharey=True)
+    fig, ax = plt.subplots(
+        len(rating_groups), 1, sharex=True, sharey=True, figsize=figsize
+    )
     for idx, (group_title, group_names) in enumerate(rating_groups.items()):
         for group_name in group_names:
             group = Group(group_name, ct)
@@ -646,7 +671,7 @@ def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
                 x=np.arange(len(group_mean)),
                 y1=group_mean - group_std,
                 y2=group_mean + group_std,
-                alpha=0.5,
+                alpha=0.3,
                 color=group_colors[group_name],
             )
         ax[idx].set_xlabel("Epochs")
@@ -655,7 +680,7 @@ def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
         ax[idx].set_title(group_title)
         # Hide inner labels
         ax[idx].label_outer()
-    Group("all", ct).plot_save("ratings_combined")
+    Group(ct.pr.name, ct).plot_save("ratings_combined")
 
     if show_plots:
         fig.show()
@@ -666,8 +691,8 @@ def _merge_measurements(data_dict):
     new_data_dict = OrderedDict()
     keys = np.asarray(list(data_dict.keys()))
     reduced_keys = np.asarray([k[:-2] for k in data_dict.keys()])
-    unique_keys = np.unique(reduced_keys, return_counts=True)
-    for uk, cnt in unique_keys:
+    unique_keys = np.unique(reduced_keys)
+    for uk in unique_keys:
         data_keys = keys[np.argwhere(reduced_keys == uk).flatten()]
         data_list = list()
         for dk in data_keys:
@@ -694,19 +719,35 @@ def _merge_measurements(data_dict):
     return new_data_dict
 
 
-def plot_ratings_evoked_comparision(ct, ch_types, meta_queries, show_plots, n_jobs):
+def _get_n_subplots(n_items):
+    n_subplots = np.ceil(np.sqrt(n_items)).astype(int)
+    ax_idxs = itertools.product(range(n_subplots), repeat=2)
+    return n_subplots, ax_idxs
+
+
+def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jobs):
     for ch_type in ch_types:
-        n_subplots = np.ceil(np.sqrt(len(ct.pr.sel_groups))).astype(int)
-        fig, ax = plt.subplots(nrows=n_subplots, ncols=n_subplots, sharex=True, sharey=True, figsize=(12, 6))
-        ax_idxs = itertools.product(range(n_subplots), repeat=2)
+        n_subplots, ax_idxs = _get_n_subplots(len(ct.pr.sel_groups))
+        fig, ax = plt.subplots(
+            nrows=n_subplots,
+            ncols=n_subplots,
+            sharex=True,
+            sharey=True,
+            figsize=figsize,
+        )
         for group_name, ax_idx in zip(ct.pr.sel_groups, ax_idxs):
             group = Group(group_name, ct)
             gfps = dict()
-            for query_trial in meta_queries.keys():
+            rating_queries = ["Lower_Ratings", "Higher_Ratings"]
+            # These trials need to be set in queries in the pipeline
+            for query_trial in rating_queries:
                 gfps[query_trial] = dict()
-                for evokeds, meeg in group.load_items(obj_type="MEEG", data_type="evoked"):
+                for evokeds, meeg in group.load_items(
+                    obj_type="MEEG", data_type="evoked"
+                ):
                     try:
                         evoked = [ev for ev in evokeds if ev.comment == query_trial][0]
+                        sfreq = evoked.info["sfreq"]
                     except IndexError:
                         raise RuntimeWarning(
                             f"No evoked found from {meeg.name} for {query_trial}"
@@ -716,7 +757,8 @@ def plot_ratings_evoked_comparision(ct, ch_types, meta_queries, show_plots, n_jo
                         times = evoked.times
                         gfp = calculate_gfp(evoked)
                         gfps[query_trial][meeg.name] = gfp
-                gfps[query_trial] = _merge_measurements(gfps[query_trial])
+                if ct.pr.name == "Experiment1":
+                    gfps[query_trial] = _merge_measurements(gfps[query_trial])
             group_data = list()
             for query_trial in gfps:
                 query_list = list()
@@ -727,15 +769,18 @@ def plot_ratings_evoked_comparision(ct, ch_types, meta_queries, show_plots, n_jo
             _plot_permutation_cluster_test(
                 group_data,
                 times,
-                ["GFP: Rating < Durchschnitt", "GFP: Rating > Durchschnitt"],
+                rating_queries,
                 one_sample=True,
                 show_plots=show_plots,
                 n_jobs=n_jobs,
                 threshold=None,
                 unit="A/m" if ch_type == "grad" else "V",
-                ax=ax[ax_idx]
+                ax=ax[ax_idx],
+                sfreq=sfreq,
+                hpass=1,
+                lpass=30,
             )
-            ax[ax_idx].set_title(f'{group.name}')
+            ax[ax_idx].set_title(f"{group.name} - {ch_type}")
             ax[ax_idx].set_xlabel("Zeit (s)")
             if ch_type == "grad":
                 ax[ax_idx].set_ylabel("magnetische Feldstärke (A/m)")
@@ -791,7 +836,7 @@ def plot_load_cell_group_ave(
 
     plt.subplots_adjust(hspace=0.2)
     fig.suptitle("Load-Cell Data")
-    Group("all", ct).plot_save("lc_trigger_all", matplotlib_figure=fig)
+    Group(ct.pr.name, ct).plot_save("lc_trigger_all", matplotlib_figure=fig)
 
     if show_plots:
         fig.show()
@@ -887,6 +932,10 @@ def _plot_permutation_cluster_test(
     n_jobs=-1,
     unit="A/m",
     ax=None,
+    sfreq=1000,
+    hpass=1,
+    lpass=30,
+    group_colors={},
 ):
     # Compute permutation cluster test
     if one_sample:
@@ -901,6 +950,7 @@ def _plot_permutation_cluster_test(
         perm_func = permutation_cluster_1samp_test
     else:
         perm_func = permutation_cluster_test
+        X = group_data
     T_obs, clusters, cluster_p_values, H0 = perm_func(
         X,
         n_permutations=n_permutations,
@@ -912,11 +962,15 @@ def _plot_permutation_cluster_test(
     )
     # Plot
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 4))
+        fig, ax = plt.subplots(figsize=figsize)
     for data, group_name in zip(group_data, group_names):
+        color = group_colors.get(group_name, None)
+        y = np.mean(data, axis=0)
+        y = mne.filter.filter_data(y, sfreq, hpass, lpass)
         ax.plot(
             times,
-            np.nanmean(data, axis=0),
+            y,
+            color=color,
             label=group_name,
         )
 
@@ -948,47 +1002,62 @@ def _plot_permutation_cluster_test(
         plt.show()
 
 
-def evoked_temporal_cluster(ct, compare_groups, cluster_trial, n_jobs, show_plots):
-    import numpy as np
+def evoked_temporal_cluster(
+    ct, ch_types, group_colors, compare_groups, cluster_trial, n_jobs, show_plots
+):
     from mne_pipeline_hd.pipeline.loading import Group
     from mne_pipeline_hd.functions.operations import calculate_gfp
 
-    for group_names in compare_groups:
-        X = list()
-        for group_name in group_names:
-            group = Group(group_name, ct)
-            trial = cluster_trial.get(group_name)
+    for ch_type in ch_types:
+        for group_names in compare_groups:
             group_data = list()
-            for evokeds, meeg in group.load_items(obj_type="MEEG", data_type="evoked"):
-                try:
-                    evoked = [ev for ev in evokeds if ev.comment == trial][0]
-                except IndexError:
-                    print(f"No evoked for {trial} in {meeg.name}")
-                else:
-                    times = evoked.times
-                    gfp = calculate_gfp(evoked)["grad"]
-                    # Apply bandpass filter 1-30 Hz
-                    gfp = mne.filter.filter_data(gfp, 1000, 1, 30)
-                    group_data.append(gfp)
-            X.append(np.asarray(group_data))
+            for group_name in group_names:
+                group = Group(group_name, ct)
+                trial = cluster_trial.get(group_name)
+                datas = dict()
+                for evokeds, meeg in group.load_items(
+                    obj_type="MEEG", data_type="evoked"
+                ):
+                    try:
+                        evoked = [ev for ev in evokeds if ev.comment == trial][0]
+                    except IndexError:
+                        print(f"No evoked for {trial} in {meeg.name}")
+                    else:
+                        times = evoked.times
+                        gfp = calculate_gfp(evoked)["grad"]
+                        # Apply bandpass filter 1-30 Hz
+                        gfp = mne.filter.filter_data(gfp, 1000, 1, 30)
+                        datas[meeg.name] = gfp
+                if ct.pr.name == "Experiment1":
+                    datas = _merge_measurements(datas)
+                group_data.append(np.asarray(list(datas.values())))
 
-        _plot_permutation_cluster_test(X, times, group_names, show_plots, n_jobs=n_jobs)
+            _plot_permutation_cluster_test(
+                group_data,
+                times,
+                group_names,
+                one_sample=False,
+                show_plots=show_plots,
+                n_jobs=n_jobs,
+                group_colors=group_colors,
+            )
 
-        group.plot_save(
-            "evoked_cluster_f_test",
-            trial=" vs ".join(group_names),
-        )
+            group.plot_save(
+                "evoked_cluster_f_test",
+                subfolder=ch_type,
+                trial=" vs ".join(group_names),
+            )
 
 
 def ltc_temporal_cluster(
-    ct, compare_groups, target_labels, cluster_trial, n_jobs, show_plots
+    ct, compare_groups, group_colors, target_labels, cluster_trial, n_jobs, show_plots
 ):
     for group_names in compare_groups:
         label_X = list()
         for group_name in group_names:
             group = Group(group_name, ct)
             trial = cluster_trial[group_name]
-            group_data = {lb_name: list() for lb_name in target_labels}
+            datas = {lb_name: dict() for lb_name in target_labels}
             for ltcs, meeg in group.load_items(obj_type="MEEG", data_type="ltc"):
                 ltcs = ltcs[trial]
                 for label_name, ltc in ltcs.items():
@@ -996,19 +1065,249 @@ def ltc_temporal_cluster(
                     times = ltc[1]
                     # Apply bandpass filter 1-30 Hz
                     ltc_data = mne.filter.filter_data(ltc[0], 1000, 1, 30)
-                    group_data[label_name].append(ltc_data)
-            label_X.append(group_data)
+                    datas[label_name][meeg.name] = ltc_data
+            if ct.pr.name == "Experiment1":
+                for label_name, data in datas.items():
+                    datas[label_name] = _merge_measurements(data)
+            label_X.append(datas)
 
-        for label_name in target_labels:
-            X = list()
+        n_subplots, ax_idxs = _get_n_subplots(len(target_labels))
+        fig, ax = plt.subplots(
+            nrows=n_subplots,
+            ncols=n_subplots,
+            sharex=True,
+            sharey=True,
+            figsize=figsize,
+        )
+        for label_name, ax_idx in zip(target_labels, ax_idxs):
+            group_data = list()
             for data in label_X:
                 label_data = data[label_name]
-                X.append(np.asarray(label_data))
+                group_data.append(np.asarray(list(label_data.values())))
 
-            _plot_permutation_cluster_test(X, times, group_names, n_jobs, show_plots)
-
-            group.plot_save(
-                "ltc_cluster_f_test",
-                subfolder=label_name,
-                trial=" vs ".join(group_names),
+            _plot_permutation_cluster_test(
+                group_data,
+                times,
+                group_names,
+                one_sample=False,
+                ax=ax[ax_idx],
+                unit="A",
+                n_jobs=n_jobs,
+                show_plots=show_plots,
+                group_colors=group_colors,
             )
+            ax[ax_idx].set_title(label_name)
+
+        group.plot_save(
+            "ltc_cluster_f_test",
+            trial=" vs ".join(group_names),
+        )
+
+
+def label_power(
+    meeg, tfr_freqs, target_labels, tfr_baseline, tfr_baseline_mode, n_jobs
+):
+    epochs = meeg.load_epochs()
+    inv_op = meeg.load_inverse_operator()
+
+    labels = meeg.fsmri.get_labels(target_labels)
+    n_cycles = tfr_freqs / 3.0
+
+    for trial in meeg.sel_trials:
+        ep = epochs[trial]
+        for lix, label in enumerate(labels):
+            print("Computing power of")
+            power, itc = source_induced_power(
+                ep,
+                inv_op,
+                tfr_freqs,
+                label,
+                baseline=tfr_baseline,
+                baseline_mode=tfr_baseline_mode,
+                n_cycles=n_cycles,
+                n_jobs=n_jobs,
+                method="dSPM",
+                pick_ori="normal",
+            )
+
+            # Average over sources
+            power = np.mean(power, axis=0)
+            power_save_path = join(
+                meeg.save_dir, f"{meeg.name}-{meeg.p_preset}-{trial}-{label.name}.npy"
+            )
+            np.save(power_save_path, power)
+            del power, itc
+            gc.collect()
+
+
+def plot_label_power(meeg, target_labels, tfr_freqs, show_plots):
+    times = meeg.load_evokeds()[0].times
+    for trial in meeg.sel_trials:
+        fig = plt.figure()
+        for lix, label in enumerate(target_labels):
+            power_save_path = join(
+                meeg.save_dir, f"{meeg.name}-{meeg.p_preset}-{trial}-{label}.npy"
+            )
+            power = np.load(power_save_path)
+            power = np.transpose(power, (1, 0))
+
+            vmax = np.max(power)
+            vmin = -vmax
+            plt.subplot(2, (len(target_labels) // 2) + 1, lix + 1)
+            plt.imshow(
+                power,
+                cmap=plt.cm.RdBu_r,
+                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
+                aspect="auto",
+                origin="lower",
+                vmin=vmin,
+                vmax=vmax,
+            )
+            plt.colorbar()
+            plt.xlabel("Time (ms)")
+            plt.ylabel("Frequency (Hz)")
+            plt.title(label)
+
+        fig.suptitle(f"Powers {meeg.name}")
+        if show_plots:
+            fig.show()
+
+        meeg.plot_save("label_power", trial=trial, matplotlib_figure=fig)
+
+
+def ga_label_power(group, target_labels, tfr_freqs, tfr_baseline_mode, show_plots):
+    for trial in group.sel_trials:
+        fig = plt.figure()
+        for lix, label in enumerate(target_labels):
+            powers = None
+            for meeg_name in group.group_list:
+                power_save_path = join(
+                    group.pr.data_path,
+                    meeg_name,
+                    f"{meeg_name}-{group.p_preset}-{trial}-{label}.npy",
+                )
+                power = np.load(power_save_path)
+                if powers is not None:
+                    powers += power
+                else:
+                    powers = power
+
+            times = MEEG(group.group_list[0], group.ct).load_epochs().times
+
+            powers /= len(group.group_list)
+            powers = np.transpose(powers, (1, 0))
+
+            if tfr_baseline_mode in ["zscore", "percent"]:
+                vmin = -1
+                vmax = 1
+            else:
+                vmax = np.max(powers)
+                vmin = -vmax
+            plt.subplot(2, (len(target_labels) // 2) + 1, lix + 1)
+            plt.imshow(
+                powers,
+                cmap=plt.cm.RdBu_r,
+                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
+                aspect="auto",
+                origin="lower",
+                vmin=vmin,
+                vmax=vmax,
+            )
+            plt.colorbar()
+            plt.xlabel("Time (ms)")
+            plt.ylabel("Frequency (Hz)")
+            plt.title(label)
+
+        fig.suptitle(f"Powers {group.name}-{trial}")
+        plt.subplots_adjust(wspace=0.3, hspace=0.5)
+        if show_plots:
+            fig.show()
+
+        group.plot_save("ga_label_power", trial=trial, matplotlib_figure=fig)
+
+
+def label_power_cond_permclust(
+    ct,
+    compare_cond,
+    tfr_freqs,
+    p_accept,
+    target_labels,
+    n_jobs,
+    show_plots,
+    n_permutations,
+):
+    """As in Compute power and phase lock in label of the source space."""
+    for compare in compare_cond:
+        comp_group = Group(f"{compare[0]}-{compare[1]}", ct)
+        fig = plt.figure()
+        for lix, label in enumerate(target_labels):
+            X = list()
+            for group_name in compare:
+                group = Group(group_name, ct)
+                group_powers = list()
+                trial = group.sel_trials[0]
+                times = MEEG(group.group_list[0], ct).load_evokeds()[0].times
+                for meeg_name in group.group_list:
+                    power_save_path = join(
+                        group.pr.data_path,
+                        meeg_name,
+                        f"{meeg_name}-{group.p_preset}-{trial}-{label}.npy",
+                    )
+                    power = np.load(power_save_path)
+                    group_powers.append(power)
+                group_powers = np.asarray(group_powers)
+                X.append(group_powers)
+
+            X = [np.transpose(x, (0, 2, 1)) for x in X]
+
+            T_obs, clusters, cluster_p_values, H0 = permutation_cluster_test(
+                X,
+                n_permutations=n_permutations,
+                n_jobs=n_jobs,
+                adjacency=None,
+                threshold=None,
+                tail=1,
+                seed=8,
+            )
+
+            good_clusted_inds = np.where(cluster_p_values < p_accept)[0]
+            print(f"Found {len(good_clusted_inds)} significant clusters")
+
+            T_obs_plot = np.nan * np.ones_like(T_obs)
+            for c, p_val in zip(clusters, cluster_p_values):
+                if p_val <= p_accept:
+                    T_obs_plot[c] = T_obs[c]
+
+            vmax = np.max(np.abs(T_obs))
+            vmin = -vmax
+            plt.subplot(2, (len(target_labels) // 2) + 1, lix + 1)
+            plt.imshow(
+                T_obs,
+                cmap=plt.cm.gray,
+                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
+                aspect="auto",
+                origin="lower",
+                vmin=vmin,
+                vmax=vmax,
+            )
+            plt.imshow(
+                T_obs_plot,
+                cmap=plt.cm.RdBu_r,
+                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
+                aspect="auto",
+                origin="lower",
+                vmin=vmin,
+                vmax=vmax,
+            )
+            plt.colorbar()
+            plt.xlabel("Time (ms)")
+            plt.ylabel("Frequency (Hz)")
+            plt.title(f"Power: {group.name}-{label}")
+
+        fig.suptitle(f"{compare[0]} vs. {compare[1]}")
+        comp_group.plot_save(
+            "label_power_cond_permclust", subfolder=f"{compare[0]} vs. {compare[1]}"
+        )
+
+        if show_plots:
+            fig.show()
