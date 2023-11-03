@@ -17,6 +17,7 @@ from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_
 from mne_pipeline_hd.pipeline.loading import Group, MEEG
 from quantiphy import Quantity
 from scipy.signal import find_peaks, savgol_filter
+from scipy.stats import ttest_1samp
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 
@@ -1366,3 +1367,59 @@ def label_power_cond_permclust(
 
         if show_plots:
             fig.show()
+
+
+def connectivity_riemann_dist(A, B):
+    # Copy lower triangle to upper triangle
+    A += np.rot90(np.fliplr(A))
+    B += np.rot90(np.fliplr(B))
+
+    # Fill diagonal with ones
+    np.fill_diagonal(A, 1)
+    np.fill_diagonal(B, 1)
+
+    # Check if positive definite
+    if not np.all(np.linalg.eigvals(A) > 0):
+        raise ValueError("A is not positive definite")
+    if not np.all(np.linalg.eigvals(B) > 0):
+        raise ValueError("B is not positive definite")
+
+    eigenvals, _ = np.linalg.eig(np.linalg.inv(A).dot(B))
+
+    return np.sqrt(np.sum(np.log(eigenvals) ** 2))
+
+
+def connectivity_geodesic_statistics(ct, compare_groups, cluster_trial):
+    results = ""
+    for group_names in compare_groups:
+        results += f"{20 * '#'}\n{' vs '.join(group_names)}\n{20 * '#'}\n"
+        data = dict()
+        for group_name in group_names:
+            group = Group(group_name, ct)
+            trial = cluster_trial[group_name]
+            group_data = list()
+            for con, meeg in group.load_items(obj_type="MEEG", data_type="src_con"):
+                con = con[trial]["wpli"]
+                freqs = con.freqs
+                group_data.append(con)
+            data[group_name] = group_data
+
+        data1 = data[group_names[0]]
+        data2 = data[group_names[0]]
+
+        for freq_idx, freq in enumerate(freqs):
+            distances = list()
+            for sub_data1, sub_data2 in zip(data1, data2):
+                con1 = sub_data1.get_data("dense")[:, :, freq_idx]
+                con2 = sub_data2.get_data("dense")[:, :, freq_idx]
+                distances.append(connectivity_riemann_dist(con1, con2))
+            # 1-sample one-sided t-test with H0: mean(geo_dist) <= 0
+            result = ttest_1samp(distances, 0, alternative="greater")
+            result_text = f"For {group_names[0]} vs {group_names[1]} at {freq:.1f} Hz the statistic for geodesic distance of connectivity is:\nmean = {np.mean(distances)}\nt = {result.statistic}\np = {result.pvalue}\n\n"
+            print(result_text)
+            results += result_text
+
+    with open(
+        join(ct.pr.save_dir_averages, f"{ct.pr.name}_geodesic_statistics.txt"), "w"
+    ) as f:
+        f.write(results)
