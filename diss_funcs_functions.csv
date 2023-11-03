@@ -17,6 +17,7 @@ plot_load_cell_group_ave;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,t
 plot_ratings_combined;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,show_plots
 evoked_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,group_colors,compare_groups,cluster_trial,n_jobs,show_plots
 ltc_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,group_colors,target_labels,cluster_trial,n_jobs,show_plots
-label_power;;MEEG;Compute;Diss;False;False;;diss_funcs;diss_funcs;meeg,tfr_freqs,target_labels,baseline,tfr_baseline_mode,n_jobs
+label_power;;MEEG;Compute;Diss;False;False;;diss_funcs;diss_funcs;meeg,tfr_freqs,inverse_method,target_labels,baseline,tfr_baseline_mode,n_jobs
 ga_label_power;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group,target_labels,tfr_freqs,tfr_baseline_mode,show_plots
 plot_label_power;;MEEG;Plot;Diss;True;False;;diss_funcs;diss_funcs;meeg,target_labels,tfr_freqs,show_plots
+label_power_cond_permclust;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,tfr_freqs,target_labels,cluster_trial,n_jobs,show_plots
