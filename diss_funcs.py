@@ -21,7 +21,7 @@ from scipy.stats import ttest_1samp
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 
-figsize = (9, 6)
+figsize = [9, 3]
 
 ##############################################################
 # Preparation
@@ -784,7 +784,6 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
                 one_sample=True,
                 show_plots=show_plots,
                 n_jobs=n_jobs,
-                threshold=None,
                 unit="A/m" if ch_type == "grad" else "V",
                 ax=ax[ax_idx],
                 sfreq=sfreq,
@@ -872,9 +871,20 @@ def plot_gfp_stacked(group, show_plots, save_plots):
         group.plot_save("gfp_stacked")
 
 
-def plot_gfp_group_stacked(ct, ch_types, show_plots, save_plots):
-    fig, ax = plt.subplots(nrows=len(ch_types), sharex=True)
-    for ch_idx, ch_type in enumerate(ch_types):
+def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
+    figsize[1] = figsize[1] * len(ch_types)
+    fig, axes = plt.subplots(
+        nrows=len(ch_types),
+        ncols=1,
+        sharex=True,
+        sharey=False,
+        figsize=figsize,
+    )
+    if not isinstance(axes, np.ndarray):
+        axes = [axes]
+    for ax_idx, ch_type in enumerate(ch_types):
+        unit = "V" if ch_type == "eeg" else "A/m"
+        ax = axes[ax_idx]
         for group_name in ct.pr.sel_groups:
             group = Group(group_name, ct)
             gfps = list()
@@ -883,51 +893,68 @@ def plot_gfp_group_stacked(ct, ch_types, show_plots, save_plots):
                 # Assumes times is everywhere the same
                 times = evoked.times
                 gfp = calculate_gfp(evoked)[ch_type]
+                # Apply bandpass filter 1-30 Hz
+                gfp = mne.filter.filter_data(gfp, 1000, 1, 30)
                 gfps.append(gfp)
-            if len(ch_types) == 1:
-                ax.plot(times, np.mean(gfps, axis=0), label=group.name)
-            else:
-                ax[ch_idx].plot(times, np.mean(gfps, axis=0), label=group.name)
-    plt.xlabel("Time (s)")
-    plt.ylabel("GFP")
-    plt.legend()
+            ax.plot(
+                times,
+                np.mean(gfps, axis=0),
+                label=group.name,
+                color=group_colors.get(group_name, "k"),
+            )
+        yformatter = FuncFormatter(lambda v, p: str(Quantity(v, unit)))
+        ax.yaxis.set_major_formatter(yformatter)
+        ax.set_title(ch_type)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel(
+            "elektrische Spannung (V)" if ch_type == "eeg" else "Magnetfeldstärke (A/m)"
+        )
+        ax.legend(loc="upper right", fontsize="small")
     plt.tight_layout()
     if show_plots:
         plt.show()
-    if save_plots:
-        plt.savefig(
-            join(
-                ct.pr.save_dir_averages,
-                f"gfp_group_stacked_{ch_type}.png",
-            ),
-            dpi=600,
-        )
+    Group("all", ct).plot_save("gfp_combined")
 
 
-def plot_ltc_group_stacked(ct, target_labels, show_plots, save_plots):
-    fig, ax = plt.subplots(nrows=len(target_labels), sharex=True, sharey=True)
+def plot_ltc_group_stacked(ct, group_colors, target_labels, show_plots, save_plots):
+    nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
+    figsize[1] = figsize[1] * ncols
+    fig, axes = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        sharex=True,
+        sharey=True,
+        figsize=figsize,
+    )
+    ax_idxs = list(ax_idxs)
     for group_name in ct.pr.sel_groups:
         group = Group(group_name, ct)
         ltcs = group.load_ga_ltc()
         # Always take the first trial
         ltcs = ltcs[list(ltcs.keys())[0]]
-        for lb_idx, label_name in enumerate(target_labels):
+        for ax_idx, label_name in zip(ax_idxs, target_labels):
             ltc = ltcs[label_name]
-            ax[lb_idx].plot(ltc[1], ltc[0], label=group.name)
-    plt.xlabel("Time (s)")
-    plt.ylabel("GFP")
-    plt.legend()
+            # Apply bandpass filter 1-30 Hz
+            ltc_data = mne.filter.filter_data(ltc[0], 1000, 1, 30)
+            times = ltc[1]
+            axes[ax_idx].plot(
+                times,
+                ltc_data,
+                label=group.name,
+                color=group_colors.get(group_name, "k"),
+            )
+            axes[ax_idx].set_title(label_name)
+    for ax in axes.flat:
+        yformatter = FuncFormatter(lambda v, p: str(Quantity(v, "A")))
+        ax.yaxis.set_major_formatter(yformatter)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("MNE Wert (A)")
+        ax.legend(loc="upper right", fontsize="small")
+        ax.label_outer()
     plt.tight_layout()
     if show_plots:
         plt.show()
-    if save_plots:
-        plt.savefig(
-            join(
-                ct.pr.save_dir_averages,
-                f"ltc_group_stacked.png",
-            ),
-            dpi=600,
-        )
+    Group("all", ct).plot_save("ltc_combined")
 
 
 ##############################################################
@@ -1037,57 +1064,62 @@ def evoked_temporal_cluster(
     from mne_pipeline_hd.pipeline.loading import Group
     from mne_pipeline_hd.functions.operations import calculate_gfp
 
-    combis = [i for i in itertools.product(ch_types, compare_groups)]
-    nrows, ncols, ax_idxs = _get_n_subplots(len(combis))
-    fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols, sharex=True, sharey=False, figsize=figsize
-    )
-    for (ch_type, group_names), ax_idx in zip(combis, ax_idxs):
-        group_data = list()
-        for group_name in group_names:
-            group = Group(group_name, ct)
-            trial = cluster_trial.get(group_name)
-            datas = dict()
-            for evokeds, meeg in group.load_items(obj_type="MEEG", data_type="evoked"):
-                try:
-                    evoked = [ev for ev in evokeds if ev.comment == trial][0]
-                except IndexError:
-                    print(f"No evoked for {trial} in {meeg.name}")
-                else:
-                    times = evoked.times
-                    gfp = calculate_gfp(evoked)[ch_type]
-                    # Apply bandpass filter 1-30 Hz
-                    gfp = mne.filter.filter_data(gfp, 1000, 1, 30)
-                    datas[meeg.name] = gfp
-            if ct.pr.name == "Experiment1":
-                datas = _merge_measurements(datas)
-            group_data.append(np.asarray(list(datas.values())))
-
-        if isinstance(axes, np.ndarray):
-            ax = axes[ax_idx]
-        else:
-            ax = axes
-
-        unit = "V" if ch_type == "eeg" else "A/m"
-
-        _plot_permutation_cluster_test(
-            group_data,
-            times,
-            group_names,
-            one_sample=True,
-            show_plots=show_plots,
-            n_jobs=n_jobs,
-            group_colors=group_colors,
-            ax=ax,
+    for group_names in compare_groups:
+        figsize[1] = figsize[1] * len(ch_types)
+        fig, axes = plt.subplots(
+            nrows=len(ch_types),
+            ncols=1,
+            sharex=True,
+            sharey=False,
+            figsize=figsize,
         )
-        ax.legend(loc="upper right", fontsize="small")
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel(
-            "elektrische Spannung (V)" if ch_type == "eeg" else "Magnetfeldstärke (A/m)"
-        )
-        ax.label_outer()
-    plt.tight_layout()
-    group.plot_save("evoked_cluster_f_test")
+        for ax_idx, ch_type in enumerate(ch_types):
+            group_data = list()
+            for group_name in group_names:
+                group = Group(group_name, ct)
+                trial = cluster_trial.get(group_name)
+                datas = dict()
+                for evokeds, meeg in group.load_items(obj_type="MEEG", data_type="evoked"):
+                    try:
+                        evoked = [ev for ev in evokeds if ev.comment == trial][0]
+                    except IndexError:
+                        print(f"No evoked for {trial} in {meeg.name}")
+                    else:
+                        times = evoked.times
+                        gfp = calculate_gfp(evoked)[ch_type]
+                        # Apply bandpass filter 1-30 Hz
+                        gfp = mne.filter.filter_data(gfp, 1000, 1, 30)
+                        datas[meeg.name] = gfp
+                if ct.pr.name == "Experiment1":
+                    datas = _merge_measurements(datas)
+                group_data.append(np.asarray(list(datas.values())))
+
+            if isinstance(axes, np.ndarray):
+                ax = axes[ax_idx]
+            else:
+                ax = axes
+
+            unit = "V" if ch_type == "eeg" else "A/m"
+
+            _plot_permutation_cluster_test(
+                group_data,
+                times,
+                group_names,
+                one_sample=True,
+                show_plots=show_plots,
+                n_jobs=n_jobs,
+                group_colors=group_colors,
+                ax=ax,
+                unit=unit,
+            )
+            ax.legend(loc="upper right", fontsize="small")
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel(
+                "elektrische Spannung (V)" if ch_type == "eeg" else "Magnetfeldstärke (A/m)"
+            )
+            ax.label_outer()
+        plt.tight_layout()
+        Group(f"{'-'.join(group_names)}", ct).plot_save("evoked_cluster_f_test")
 
 
 def ltc_temporal_cluster(
@@ -1138,6 +1170,10 @@ def ltc_temporal_cluster(
                 group_colors=group_colors,
             )
             ax[ax_idx].set_title(label_name)
+            ax[ax_idx].legend(loc="upper right", fontsize="small")
+            ax[ax_idx].set_xlabel("Time (s)")
+            ax[ax_idx].set_ylabel("MNE Wert (A)")
+            ax[ax_idx].label_outer()
 
         group.plot_save(
             "ltc_cluster_f_test",
@@ -1275,7 +1311,7 @@ def ga_label_power(group, target_labels, tfr_freqs, tfr_baseline_mode, show_plot
 
 def label_power_cond_permclust(
     ct,
-    compare_groups,
+    label_pw_groups,
     tfr_freqs,
     target_labels,
     cluster_trial,
@@ -1283,10 +1319,13 @@ def label_power_cond_permclust(
     show_plots,
 ):
     """As in Compute power and phase lock in label of the source space."""
-    p_accept = 0.05
-    tail = 1
-    for group_names in compare_groups:
-        if len(group_names) != 2:
+    for group_names in label_pw_groups:
+        if len(group_names) == 1:
+            p_accept = 0.005
+        else:
+            p_accept = 0.15
+        tail = 1
+        if len(group_names) > 2:
             raise ValueError("Only two groups allowed for comparison")
         nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
         fig, ax = plt.subplots(
@@ -1311,8 +1350,12 @@ def label_power_cond_permclust(
                 group_powers = np.asarray(group_powers)
                 X.append(group_powers)
 
+            # Also allow one sample (testing against 0)
             X = [np.transpose(x, (0, 2, 1)) for x in X]
-            X = X[0] - X[1]
+            if len(X) == 2:
+                X = X[0] - X[1]
+            else:
+                X = X[0]
 
             threshold = _get_threshold(p_accept, X.shape[0], tail=tail)
             T_obs, clusters, cluster_p_values, H0 = permutation_cluster_1samp_test(
@@ -1335,7 +1378,7 @@ def label_power_cond_permclust(
             vmax = np.std(np.abs(T_obs)) * 3
             vmin = -vmax
 
-            im = ax[ax_idx].imshow(
+            ax[ax_idx].imshow(
                 T_obs,
                 cmap=plt.cm.gray,
                 extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
@@ -1344,7 +1387,7 @@ def label_power_cond_permclust(
                 vmin=vmin,
                 vmax=vmax,
             )
-            ax[ax_idx].imshow(
+            im = ax[ax_idx].imshow(
                 T_obs_plot,
                 cmap=plt.cm.RdBu_r,
                 extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
@@ -1358,8 +1401,8 @@ def label_power_cond_permclust(
             ax[ax_idx].set_ylabel("Frequency (Hz)")
             ax[ax_idx].label_outer()
             ax[ax_idx].set_title(label)
-        plt_title = " vs. ".join(group_names)
-        fig.suptitle(plt_title)
+        plt_title = "-".join(group_names)
+        fig.suptitle(f"{plt_title} (cluster for p < {p_accept})")
         plt.tight_layout()
         Group("all", ct).plot_save(
             f"label_power_permclust_{plt_title}", matplotlib_figure=fig
@@ -1389,9 +1432,15 @@ def connectivity_riemann_dist(A, B):
     return np.sqrt(np.sum(np.log(eigenvals) ** 2))
 
 
-def connectivity_geodesic_statistics(ct, compare_groups, cluster_trial):
+def connectivity_geodesic_statistics(
+    ct, compare_groups, cluster_trial, show_plots, save_plots
+):
     results = ""
-    for group_names in compare_groups:
+    nrows, ncols, ax_idxs = _get_n_subplots(len(compare_groups))
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, sharex=True, sharey=True)
+    for group_names, ax_idx in zip(compare_groups, ax_idxs):
+        if len(group_names) != 2:
+            raise ValueError("Group-Names of 'compare_groups' can only be two.")
         results += f"{20 * '#'}\n{' vs '.join(group_names)}\n{20 * '#'}\n"
         data = dict()
         for group_name in group_names:
@@ -1405,20 +1454,44 @@ def connectivity_geodesic_statistics(ct, compare_groups, cluster_trial):
             data[group_name] = group_data
 
         data1 = data[group_names[0]]
-        data2 = data[group_names[0]]
+        data2 = data[group_names[1]]
 
+        if isinstance(axes, np.ndarray):
+            ax = axes[ax_idx]
+        else:
+            ax = axes
+
+        excluded_subs = 0
+        group_distances = list()
         for freq_idx, freq in enumerate(freqs):
             distances = list()
             for sub_data1, sub_data2 in zip(data1, data2):
                 con1 = sub_data1.get_data("dense")[:, :, freq_idx]
                 con2 = sub_data2.get_data("dense")[:, :, freq_idx]
-                distances.append(connectivity_riemann_dist(con1, con2))
+                try:
+                    distances.append(connectivity_riemann_dist(con1, con2))
+                except ValueError as exc:
+                    print(exc)
+                    print(f"Connectivity-data will be excluded")
+                    excluded_subs += 1
+
+            print(f"{excluded_subs} subjects where excluded")
             # 1-sample one-sided t-test with H0: mean(geo_dist) <= 0
             result = ttest_1samp(distances, 0, alternative="greater")
+            group_distances.append(distances)
             result_text = f"For {group_names[0]} vs {group_names[1]} at {freq:.1f} Hz the statistic for geodesic distance of connectivity is:\nmean = {np.mean(distances)}\nt = {result.statistic}\np = {result.pvalue}\n\n"
             print(result_text)
             results += result_text
-
+        ax.boxplot(group_distances)
+        ax.set_title("Connectivity geodesic distance for " + " vs. ".join(group_names))
+        ax.set_xlabel("Frequency (Hz)")
+        ax.set_ylabel("Geodesic distance")
+        ax.set_xticklabels([f"{v:.1f} Hz" for v in freqs])
+    plt.tight_layout()
+    if show_plots:
+        fig.show()
+    if save_plots:
+        Group(ct.pr.name, ct).plot_save("connectivity_geodesic_distances")
     with open(
         join(ct.pr.save_dir_averages, f"{ct.pr.name}_geodesic_statistics.txt"), "w"
     ) as f:
