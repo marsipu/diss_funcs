@@ -596,7 +596,10 @@ def _get_load_cell_epochs(
     epochs_dict = dict()
     times = None
 
-    for idx, trial in enumerate(meeg.sel_trials):
+    # Exclude rating-trials
+    for idx, trial in enumerate(
+        [t for t in meeg.sel_trials if any([s in t for s in ["Down", "Up"]])]
+    ):
         selected_ev_id = {key: value for key, value in event_id.items() if key == trial}
         # if 'Last' in trial:
         #     baseline = (round(baseline_limit/1000, 3), trig_plt_tmax)
@@ -610,6 +613,7 @@ def _get_load_cell_epochs(
             tmin=trig_plt_tmin,
             tmax=trig_plt_tmax,
             baseline=None,
+            reject={"stim": 0.002},
         )
         times = eeg_epochs.times
         data = eeg_epochs.get_data()
@@ -813,11 +817,13 @@ def plot_load_cell_group_ave(
     trig_channel,
     group_colors,
 ):
-    fig, ax = plt.subplots(len(ct.pr.sel_groups), 1, sharey=True, sharex=True)
+    groups = [g for g in ct.pr.sel_groups if "Laser" not in g]
+    figsize[1] = figsize[1] * len(groups)
+    fig, ax = plt.subplots(len(groups), 1, sharey=False, sharex=True, figsize=figsize)
     if not isinstance(ax, np.ndarray):
         ax = [ax]
 
-    for idx, group_name in enumerate(ct.pr.sel_groups):
+    for idx, group_name in enumerate(groups):
         group = Group(group_name, ct)
         for meeg_name in group.group_list:
             meeg = MEEG(meeg_name, group.ct)
@@ -846,29 +852,11 @@ def plot_load_cell_group_ave(
         if idx == len(ct.pr.sel_groups) - 1:
             ax[idx].set_xlabel("Time [s]")
 
-    plt.subplots_adjust(hspace=0.2)
     fig.suptitle("Load-Cell Data")
     Group(ct.pr.name, ct).plot_save("lc_trigger_all", matplotlib_figure=fig)
 
     if show_plots:
         fig.show()
-
-
-def plot_gfp_stacked(group, show_plots, save_plots):
-    fig, ax = plt.subplots()
-    for evokeds, meeg in group.load_items(data_type="evoked"):
-        evoked = evokeds[0]
-        times = evoked.times
-        gfp = calculate_gfp(evoked)
-        ax.plot(times, gfp["grad"], label=meeg.name)
-    plt.xlabel("Time (s)")
-    plt.ylabel("GFP")
-    plt.title(f"GFP compared across velocities for {group.name}")
-    plt.legend()
-    if show_plots:
-        plt.show()
-    if save_plots:
-        group.plot_save("gfp_stacked")
 
 
 def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
@@ -1079,7 +1067,9 @@ def evoked_temporal_cluster(
                 group = Group(group_name, ct)
                 trial = cluster_trial.get(group_name)
                 datas = dict()
-                for evokeds, meeg in group.load_items(obj_type="MEEG", data_type="evoked"):
+                for evokeds, meeg in group.load_items(
+                    obj_type="MEEG", data_type="evoked"
+                ):
                     try:
                         evoked = [ev for ev in evokeds if ev.comment == trial][0]
                     except IndexError:
@@ -1115,7 +1105,9 @@ def evoked_temporal_cluster(
             ax.legend(loc="upper right", fontsize="small")
             ax.set_xlabel("Time (s)")
             ax.set_ylabel(
-                "elektrische Spannung (V)" if ch_type == "eeg" else "Magnetfeldstärke (A/m)"
+                "elektrische Spannung (V)"
+                if ch_type == "eeg"
+                else "Magnetfeldstärke (A/m)"
             )
             ax.label_outer()
         plt.tight_layout()
@@ -1220,93 +1212,6 @@ def label_power(
             np.save(power_save_path, power)
             del power, itc
             gc.collect()
-
-
-def plot_label_power(meeg, target_labels, tfr_freqs, show_plots):
-    times = meeg.load_evokeds()[0].times
-    for trial in meeg.sel_trials:
-        fig = plt.figure()
-        for lix, label in enumerate(target_labels):
-            power_save_path = join(
-                meeg.save_dir, f"{meeg.name}-{meeg.p_preset}-{trial}-{label}.npy"
-            )
-            power = np.load(power_save_path)
-            power = np.transpose(power, (1, 0))
-
-            vmax = np.max(power)
-            vmin = -vmax
-            plt.subplot(2, (len(target_labels) // 2) + 1, lix + 1)
-            plt.imshow(
-                power,
-                cmap=plt.cm.RdBu_r,
-                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
-                aspect="auto",
-                origin="lower",
-                vmin=vmin,
-                vmax=vmax,
-            )
-            plt.colorbar()
-            plt.xlabel("Time (ms)")
-            plt.ylabel("Frequency (Hz)")
-            plt.title(label)
-
-        fig.suptitle(f"Powers {meeg.name}")
-        if show_plots:
-            fig.show()
-
-        meeg.plot_save("label_power", trial=trial, matplotlib_figure=fig)
-
-
-def ga_label_power(group, target_labels, tfr_freqs, tfr_baseline_mode, show_plots):
-    nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
-    for trial in group.sel_trials:
-        fig, ax = plt.subplots(
-            nrows=nrows, ncols=ncols, sharex=True, sharey=True, figsize=figsize
-        )
-        for label, ax_idx in zip(target_labels, ax_idxs):
-            powers = None
-            for meeg_name in group.group_list:
-                power_save_path = join(
-                    group.pr.data_path,
-                    meeg_name,
-                    f"{meeg_name}-{group.p_preset}-{trial}-{label}.npy",
-                )
-                power = np.load(power_save_path)
-                if powers is not None:
-                    powers += power
-                else:
-                    powers = power
-
-            times = MEEG(group.group_list[0], group.ct).load_epochs().times
-
-            powers /= len(group.group_list)
-            powers = np.transpose(powers, (1, 0))
-
-            if tfr_baseline_mode in ["zscore", "percent"]:
-                vmin = -1
-                vmax = 1
-            else:
-                vmax = np.max(powers)
-                vmin = -vmax
-
-            im = ax[ax_idx].imshow(
-                powers,
-                cmap=plt.cm.RdBu_r,
-                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
-                aspect="auto",
-                origin="lower",
-                vmin=vmin,
-                vmax=vmax,
-            )
-            fig.colorbar(im, cax=ax[ax_idx])
-            ax[ax_idx].set_xlabel("Time (ms)")
-            ax[ax_idx].set_ylabel("Frequency (Hz)")
-            ax[ax_idx].set_title(label)
-
-        if show_plots:
-            fig.show()
-
-        group.plot_save("ga_label_power", trial=trial, matplotlib_figure=fig)
 
 
 def label_power_cond_permclust(

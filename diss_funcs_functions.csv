@@ -9,7 +9,6 @@ get_ratings_laser;;MEEG;Ratings;Diss;False;False;;diss_funcs;diss_funcs;meeg,las
 remove_metadata;;MEEG;Ratings;Diss;False;False;;diss_funcs;diss_funcs;meeg
 add_ratings_meta;;MEEG;Ratings;Diss;False;False;;diss_funcs;diss_funcs;meeg
 get_load_cell_events_regression_baseline;;MEEG;Compute;Diss;False;False;;diss_funcs;diss_funcs;meeg,min_duration,shortest_event,adjust_timeline_by_msec,diff_window,min_ev_distance,max_ev_distance,len_baseline,baseline_limit,regression_degree,trig_channel,n_jobs
-plot_gfp_stacked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group,show_plots,save_plots
 plot_gfp_group_stacked;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,ch_types,show_plots,save_plots
 plot_ltc_group_stacked;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,target_labels,show_plots,save_plots
 plot_ratings_evoked_comparision;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,group_colors,show_plots,n_jobs
@@ -18,7 +17,5 @@ plot_ratings_combined;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,grou
 evoked_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,group_colors,compare_groups,cluster_trial,n_jobs,show_plots
 ltc_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,group_colors,target_labels,cluster_trial,n_jobs,show_plots
 label_power;;MEEG;Compute;Diss;False;False;;diss_funcs;diss_funcs;meeg,tfr_freqs,inverse_method,target_labels,baseline,tfr_baseline_mode,n_jobs
-ga_label_power;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group,target_labels,tfr_freqs,tfr_baseline_mode,show_plots
-plot_label_power;;MEEG;Plot;Diss;True;False;;diss_funcs;diss_funcs;meeg,target_labels,tfr_freqs,show_plots
 label_power_cond_permclust;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,label_pw_groups,tfr_freqs,target_labels,cluster_trial,n_jobs,show_plots
 connectivity_geodesic_statistics;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,cluster_trial,show_plots,save_plots
