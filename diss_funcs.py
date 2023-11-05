@@ -818,8 +818,8 @@ def plot_load_cell_group_ave(
     group_colors,
 ):
     groups = [g for g in ct.pr.sel_groups if "Laser" not in g]
-    figsize[1] = figsize[1] * len(groups)
-    fig, ax = plt.subplots(len(groups), 1, sharey=False, sharex=True, figsize=figsize)
+    fs = [figsize[0], figsize[1] * len(groups)]
+    fig, ax = plt.subplots(len(groups), 1, sharey=False, sharex=True, figsize=fs)
     if not isinstance(ax, np.ndarray):
         ax = [ax]
 
@@ -860,19 +860,17 @@ def plot_load_cell_group_ave(
 
 
 def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
-    figsize[1] = figsize[1] * len(ch_types)
+    fs = [figsize[0], figsize[1] * len(ch_types)]
     fig, axes = plt.subplots(
         nrows=len(ch_types),
         ncols=1,
         sharex=True,
         sharey=False,
-        figsize=figsize,
+        figsize=fs,
     )
     if not isinstance(axes, np.ndarray):
         axes = [axes]
     for ax_idx, ch_type in enumerate(ch_types):
-        unit = "V" if ch_type == "eeg" else "A/m"
-        ax = axes[ax_idx]
         for group_name in ct.pr.sel_groups:
             group = Group(group_name, ct)
             gfps = list()
@@ -884,20 +882,23 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
                 # Apply bandpass filter 1-30 Hz
                 gfp = mne.filter.filter_data(gfp, 1000, 1, 30)
                 gfps.append(gfp)
-            ax.plot(
+            axes[ax_idx].plot(
                 times,
                 np.mean(gfps, axis=0),
                 label=group.name,
                 color=group_colors.get(group_name, "k"),
             )
-        yformatter = FuncFormatter(lambda v, p: str(Quantity(v, unit)))
-        ax.yaxis.set_major_formatter(yformatter)
-        ax.set_title(ch_type)
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel(
+        if ch_type == "eeg":
+            yformatter = FuncFormatter(lambda v, p: str(Quantity(v, "V")))
+        else:
+            yformatter = FuncFormatter(lambda v, p: str(Quantity(v, "A/m")))
+        axes[ax_idx].yaxis.set_major_formatter(yformatter)
+        axes[ax_idx].set_title(ch_type)
+        axes[ax_idx].set_xlabel("Time (s)")
+        axes[ax_idx].set_ylabel(
             "elektrische Spannung (V)" if ch_type == "eeg" else "Magnetfeldstärke (A/m)"
         )
-        ax.legend(loc="upper right", fontsize="small")
+        axes[ax_idx].legend(loc="upper right", fontsize="small")
     plt.tight_layout()
     if show_plots:
         plt.show()
@@ -906,13 +907,13 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
 
 def plot_ltc_group_stacked(ct, group_colors, target_labels, show_plots, save_plots):
     nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
-    figsize[1] = figsize[1] * ncols
+    fs = [figsize[0], figsize[1] * nrows]
     fig, axes = plt.subplots(
         nrows=nrows,
         ncols=ncols,
         sharex=True,
         sharey=True,
-        figsize=figsize,
+        figsize=fs,
     )
     ax_idxs = list(ax_idxs)
     for group_name in ct.pr.sel_groups:
@@ -1023,13 +1024,20 @@ def _plot_permutation_cluster_test(
     for i_c, c in enumerate(clusters):
         c = c[0]
         cpval = cluster_p_values[i_c]
+
+        # Exclude clusters if before 0
+        if times[c.start] < 0:
+            continue
+
         if cpval <= 0.05:
+            t_start = times[c.start]
+            t_stop = times[c.stop - 1]
             ax.axvspan(
-                times[c.start],
-                times[c.stop - 1],
+                t_start,
+                t_stop,
                 color="r",
                 alpha=0.3,
-                label=f"p_val_{s_counter} = {cpval:.3f}",
+                label=f"{s_counter}: p_val={cpval:.3f}, {t_start:.3f}-{t_stop:.3f} s",
             )
             s_counter += 1
         # else:
@@ -1053,13 +1061,13 @@ def evoked_temporal_cluster(
     from mne_pipeline_hd.functions.operations import calculate_gfp
 
     for group_names in compare_groups:
-        figsize[1] = figsize[1] * len(ch_types)
+        fs = [figsize[0], figsize[1] * len(ch_types)]
         fig, axes = plt.subplots(
             nrows=len(ch_types),
             ncols=1,
             sharex=True,
             sharey=False,
-            figsize=figsize,
+            figsize=fs,
         )
         for ax_idx, ch_type in enumerate(ch_types):
             group_data = list()
@@ -1137,12 +1145,13 @@ def ltc_temporal_cluster(
             label_X.append(datas)
 
         nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
+        fs = [figsize[0], figsize[1] * nrows]
         fig, ax = plt.subplots(
             nrows=nrows,
             ncols=ncols,
             sharex=True,
             sharey=True,
-            figsize=figsize,
+            figsize=fs,
         )
         for label_name, ax_idx in zip(target_labels, ax_idxs):
             group_data = list()
@@ -1227,14 +1236,16 @@ def label_power_cond_permclust(
     for group_names in label_pw_groups:
         if len(group_names) == 1:
             p_accept = 0.005
+            tail = 0
         else:
             p_accept = 0.15
-        tail = 1
+            tail = 1
         if len(group_names) > 2:
             raise ValueError("Only two groups allowed for comparison")
         nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
+        fs = [figsize[0], figsize[1] * nrows]
         fig, ax = plt.subplots(
-            nrows=nrows, ncols=ncols, sharex=True, sharey=True, figsize=figsize
+            nrows=nrows, ncols=ncols, sharex=True, sharey=True, figsize=fs
         )
         for label, ax_idx in zip(target_labels, ax_idxs):
             X = list()
@@ -1307,7 +1318,7 @@ def label_power_cond_permclust(
             ax[ax_idx].label_outer()
             ax[ax_idx].set_title(label)
         plt_title = "-".join(group_names)
-        fig.suptitle(f"{plt_title} (cluster for p < {p_accept})")
+        fig.suptitle(f"{plt_title} (cluster for p < {p_accept}), tail={tail}")
         plt.tight_layout()
         Group("all", ct).plot_save(
             f"label_power_permclust_{plt_title}", matplotlib_figure=fig
@@ -1338,7 +1349,7 @@ def connectivity_riemann_dist(A, B):
 
 
 def connectivity_geodesic_statistics(
-    ct, compare_groups, cluster_trial, show_plots, save_plots
+    ct, compare_groups, cluster_trial, show_plots, save_plots, con_fmin, con_fmax,
 ):
     results = ""
     nrows, ncols, ax_idxs = _get_n_subplots(len(compare_groups))
@@ -1391,7 +1402,7 @@ def connectivity_geodesic_statistics(
         ax.set_title("Connectivity geodesic distance for " + " vs. ".join(group_names))
         ax.set_xlabel("Frequency (Hz)")
         ax.set_ylabel("Geodesic distance")
-        ax.set_xticklabels([f"{v:.1f} Hz" for v in freqs])
+        ax.set_xticklabels([f"{fmin}-{fmax}" for fmin, fmax in zip(con_fmin, con_fmax)])
     plt.tight_layout()
     if show_plots:
         fig.show()
