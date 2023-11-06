@@ -748,16 +748,20 @@ def _get_n_subplots(n_items):
     return nrows, ncols, ax_idxs
 
 
+ch_type_names = {"eeg": "EEG", "grad": "MEG"}
+
+
 def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jobs):
     """Evokedsa are compared for lower and higher rating."""
     for ch_type in ch_types:
         nrows, ncols, ax_idxs = _get_n_subplots(len(ct.pr.sel_groups))
+        fs = [figsize[0], figsize[1] * nrows]
         fig, ax = plt.subplots(
             nrows=nrows,
             ncols=ncols,
             sharex=True,
             sharey=True,
-            figsize=figsize,
+            figsize=fs,
         )
         for group_name, ax_idx in zip(ct.pr.sel_groups, ax_idxs):
             group = Group(group_name, ct)
@@ -807,7 +811,7 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
                 group_colors=colors,
                 group_alphas=alphas,
             )
-            ax[ax_idx].set_title(f"{group.name} - {ch_type}")
+            ax[ax_idx].set_title(f"{group.name} - {ch_type_names[ch_type]}")
             ax[ax_idx].set_xlabel("Zeit (s)")
             if ch_type == "grad":
                 ax[ax_idx].set_ylabel("Magnetfeldstärke (A/m)")
@@ -906,7 +910,7 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
         else:
             yformatter = FuncFormatter(lambda v, p: str(Quantity(v, "A/m")))
         axes[ax_idx].yaxis.set_major_formatter(yformatter)
-        axes[ax_idx].set_title(ch_type)
+        axes[ax_idx].set_title(ch_type_names[ch_type])
         axes[ax_idx].set_xlabel("Time (s)")
         axes[ax_idx].set_ylabel(
             "elektrische Spannung (V)" if ch_type == "eeg" else "Magnetfeldstärke (A/m)"
