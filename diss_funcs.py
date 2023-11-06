@@ -29,6 +29,7 @@ figsize = [9, 3]
 
 
 def combine_labels(fsmri, label_combinations):
+    """This combines existing labels to bigger labels with a new name."""
     for new_label_name, label_names in label_combinations.items():
         labels = fsmri.get_labels(label_names)
         new_label = labels[0]
@@ -43,6 +44,7 @@ def combine_labels(fsmri, label_combinations):
 
 
 def change_trig_channel_type(meeg, trig_channel):
+    """Changes the channel-type of the Load-Cell-channel to 'stim'."""
     raw = meeg.load_raw()
 
     if trig_channel in raw.ch_names:
@@ -70,6 +72,7 @@ def change_trig_channel_type(meeg, trig_channel):
 
 
 def rereference_eog(meeg, eog_tuple, eogecg_target):
+    """EEG-channels are rereferenced to construct a single EOG-channel."""
     if eogecg_target == "Raw (Unfiltered)":
         raw = meeg.load_raw()
     else:
@@ -158,6 +161,7 @@ def get_dig_eegs(meeg, n_eeg_channels, eeg_dig_first=True):
 
 
 def pl1_laser_event_correction(meeg):
+    """A mistake during data-acquistion of the first subject of Experiment 2 is corrected."""
     if meeg.name != "pl1_laser2J":
         print("Only for pl1_laser2J")
         return
@@ -173,6 +177,7 @@ def pl1_laser_event_correction(meeg):
 # Ratings
 ##############################################################
 def get_ratings(meeg, target_event_id):
+    """Ratings encoded into trigger-signals 10-19 are decoded and saved as .csv-file."""
     events = meeg.load_events()
 
     file_name = "ratings_meta"
@@ -218,6 +223,7 @@ def get_ratings(meeg, target_event_id):
 
 
 def get_ratings_laser(meeg, laser_target_event_id):
+    """Ratings encoded into trigger-signals 1-10 are decoded and saved as.csv-file."""
     events = meeg.load_events()
 
     file_name = "ratings_meta"
@@ -302,6 +308,7 @@ def _add_events_meta(epochs, meta_pd):
 
 
 def add_ratings_meta(meeg):
+    """Ratings are added as metadata to epochs."""
     epochs = meeg.load_epochs()
     file_name = "ratings_meta"
     file_path = join(meeg.save_dir, f"{meeg.name}_{meeg.p_preset}_{file_name}.csv")
@@ -312,6 +319,7 @@ def add_ratings_meta(meeg):
 
 
 def remove_metadata(meeg):
+    """Metadata is removed from epochs."""
     epochs = meeg.load_epochs()
     epochs.metadata = None
     meeg.save_epochs(epochs)
@@ -334,6 +342,7 @@ def get_load_cell_events_regression_baseline(
     trig_channel,
     n_jobs,
 ):
+    """The events are extracted from the load-cell signal using a rolling-difference, baseline and regression."""
     # Load Raw and extract the load-cell-trigger-channel
     raw = meeg.load_raw()
     if trig_channel not in raw.ch_names:
@@ -642,7 +651,7 @@ def _get_load_cell_epochs(
 
 
 ##############################################################
-# Plots (descriptive)
+# Plots
 ##############################################################
 def _mean_of_different_lengths(data):
     arr = np.ma.empty((len(data), max([len(d) for d in data])))
@@ -654,6 +663,7 @@ def _mean_of_different_lengths(data):
 
 
 def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
+    """The Ratings of all groups are plotted together."""
     fig, ax = plt.subplots(
         len(rating_groups), 1, sharex=True, sharey=True, figsize=figsize
     )
@@ -739,6 +749,7 @@ def _get_n_subplots(n_items):
 
 
 def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jobs):
+    """Evokedsa are compared for lower and higher rating."""
     for ch_type in ch_types:
         nrows, ncols, ax_idxs = _get_n_subplots(len(ct.pr.sel_groups))
         fig, ax = plt.subplots(
@@ -817,6 +828,7 @@ def plot_load_cell_group_ave(
     trig_channel,
     group_colors,
 ):
+    """The Load-Cell-Signal is plotted for all groups and subjects."""
     groups = [g for g in ct.pr.sel_groups if "Laser" not in g]
     fs = [figsize[0], figsize[1] * len(groups)]
     fig, ax = plt.subplots(len(groups), 1, sharey=False, sharex=True, figsize=fs)
@@ -860,6 +872,7 @@ def plot_load_cell_group_ave(
 
 
 def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
+    """The GFP of all groups is compared."""
     fs = [figsize[0], figsize[1] * len(ch_types)]
     fig, axes = plt.subplots(
         nrows=len(ch_types),
@@ -906,6 +919,7 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
 
 
 def plot_ltc_group_stacked(ct, group_colors, target_labels, show_plots, save_plots):
+    """The label-time-course of all groups is compared."""
     nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
     fs = [figsize[0], figsize[1] * nrows]
     fig, axes = plt.subplots(
@@ -1057,6 +1071,7 @@ def _plot_permutation_cluster_test(
 def evoked_temporal_cluster(
     ct, ch_types, group_colors, compare_groups, cluster_trial, n_jobs, show_plots
 ):
+    """A 1sample-permutation-cluster-test with clustering in time is performed between the evoked of two stimulus-groups."""
     from mne_pipeline_hd.pipeline.loading import Group
     from mne_pipeline_hd.functions.operations import calculate_gfp
 
@@ -1125,6 +1140,7 @@ def evoked_temporal_cluster(
 def ltc_temporal_cluster(
     ct, compare_groups, group_colors, target_labels, cluster_trial, n_jobs, show_plots
 ):
+    """A 1sample-permutation-cluster-test with clustering in time is performed between the label-time-courses of two stimulus-groups."""
     for group_names in compare_groups:
         label_X = list()
         for group_name in group_names:
@@ -1191,7 +1207,7 @@ def label_power(
     tfr_baseline_mode,
     n_jobs,
 ):
-    epochs = meeg.load_epochs()
+    """The power inside the given labels is computed and saved."""
     inv_op = meeg.load_inverse_operator()
 
     labels = meeg.fsmri.get_labels(target_labels)
@@ -1232,6 +1248,7 @@ def label_power_cond_permclust(
     n_jobs,
     show_plots,
 ):
+    """The power inside the given labels is compared between groups with a 1sample-permutation-cluster-test with clustering in time and frequency."""
     """As in Compute power and phase lock in label of the source space."""
     for group_names in label_pw_groups:
         if len(group_names) == 1:
@@ -1328,7 +1345,8 @@ def label_power_cond_permclust(
             fig.show()
 
 
-def connectivity_riemann_dist(A, B):
+def _connectivity_geodesic_dist(A, B):
+    """Prepares the connectivity matrix and computes the geodesic distance."""
     # Copy lower triangle to upper triangle
     A += np.rot90(np.fliplr(A))
     B += np.rot90(np.fliplr(B))
@@ -1349,12 +1367,21 @@ def connectivity_riemann_dist(A, B):
 
 
 def connectivity_geodesic_statistics(
-    ct, compare_groups, cluster_trial, show_plots, save_plots, con_fmin, con_fmax,
+    ct,
+    compare_groups,
+    cluster_trial,
+    show_plots,
+    save_plots,
+    con_fmin,
+    con_fmax,
 ):
+    """This computes the geodesic distance between connectivity matrices of two groups,
+    calculates a 1sample-t-test and plots the results."""
     results = ""
-    nrows, ncols, ax_idxs = _get_n_subplots(len(compare_groups))
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, sharex=True, sharey=True)
-    for group_names, ax_idx in zip(compare_groups, ax_idxs):
+    fig, axes = plt.subplots(
+        ncols=len(compare_groups), sharex=True, sharey=True, figsize=[12, 3]
+    )
+    for ax_idx, group_names in enumerate(compare_groups):
         if len(group_names) != 2:
             raise ValueError("Group-Names of 'compare_groups' can only be two.")
         results += f"{20 * '#'}\n{' vs '.join(group_names)}\n{20 * '#'}\n"
@@ -1372,11 +1399,6 @@ def connectivity_geodesic_statistics(
         data1 = data[group_names[0]]
         data2 = data[group_names[1]]
 
-        if isinstance(axes, np.ndarray):
-            ax = axes[ax_idx]
-        else:
-            ax = axes
-
         excluded_subs = 0
         group_distances = list()
         for freq_idx, freq in enumerate(freqs):
@@ -1385,7 +1407,7 @@ def connectivity_geodesic_statistics(
                 con1 = sub_data1.get_data("dense")[:, :, freq_idx]
                 con2 = sub_data2.get_data("dense")[:, :, freq_idx]
                 try:
-                    distances.append(connectivity_riemann_dist(con1, con2))
+                    distances.append(_connectivity_geodesic_dist(con1, con2))
                 except ValueError as exc:
                     print(exc)
                     print(f"Connectivity-data will be excluded")
@@ -1398,11 +1420,18 @@ def connectivity_geodesic_statistics(
             result_text = f"For {group_names[0]} vs {group_names[1]} at {freq:.1f} Hz the statistic for geodesic distance of connectivity is:\nmean = {np.mean(distances)}\nt = {result.statistic}\np = {result.pvalue}\n\n"
             print(result_text)
             results += result_text
-        ax.boxplot(group_distances)
-        ax.set_title("Connectivity geodesic distance for " + " vs. ".join(group_names))
-        ax.set_xlabel("Frequency (Hz)")
-        ax.set_ylabel("Geodesic distance")
-        ax.set_xticklabels([f"{fmin}-{fmax}" for fmin, fmax in zip(con_fmin, con_fmax)])
+        axes[ax_idx].boxplot(group_distances)
+        axes[ax_idx].set_title(
+            "Connectivity geodesic distance for " + " vs. ".join(group_names)
+        )
+        axes[ax_idx].set_xlabel("Frequency (Hz)")
+        axes[ax_idx].set_ylabel("Geodesic distance")
+        axes[ax_idx].label_outer()
+
+    axes[ax_idx].set_xticks(
+        np.arange(1, len(con_fmin) + 1),
+        [f"{fmin}-{fmax}" for fmin, fmax in zip(con_fmin, con_fmax)],
+    )
     plt.tight_layout()
     if show_plots:
         fig.show()
