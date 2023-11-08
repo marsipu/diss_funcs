@@ -3,7 +3,8 @@ import itertools
 import logging
 import sys
 from collections import OrderedDict
-from os.path import join
+from os import mkdir
+from os.path import join, isdir
 
 import mne
 import numpy as np
@@ -664,9 +665,8 @@ def _mean_of_different_lengths(data):
 
 def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
     """The Ratings of all groups are plotted together."""
-    fig, ax = plt.subplots(
-        len(rating_groups), 1, sharex=True, sharey=True, figsize=figsize
-    )
+    fs = [figsize[0], figsize[1] * len(rating_groups)]
+    fig, ax = plt.subplots(len(rating_groups), 1, sharex=True, sharey=True, figsize=fs)
     for idx, (group_title, group_names) in enumerate(rating_groups.items()):
         for group_name in group_names:
             group = Group(group_name, ct)
@@ -897,7 +897,7 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
                 times = evoked.times
                 gfp = calculate_gfp(evoked)[ch_type]
                 # Apply bandpass filter 1-30 Hz
-                gfp = mne.filter.filter_data(gfp, 1000, 1, 30)
+                gfp = mne.filter.filter_data(gfp, 1000, None, 30)
                 gfps.append(gfp)
             axes[ax_idx].plot(
                 times,
@@ -905,11 +905,6 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
                 label=group.name,
                 color=group_colors.get(group_name, "k"),
             )
-        if ch_type == "eeg":
-            yformatter = FuncFormatter(lambda v, p: str(Quantity(v, "V")))
-        else:
-            yformatter = FuncFormatter(lambda v, p: str(Quantity(v, "A/m")))
-        axes[ax_idx].yaxis.set_major_formatter(yformatter)
         axes[ax_idx].set_title(ch_type_names[ch_type])
         axes[ax_idx].set_xlabel("Time (s)")
         axes[ax_idx].set_ylabel(
@@ -942,7 +937,7 @@ def plot_ltc_group_stacked(ct, group_colors, target_labels, show_plots, save_plo
         for ax_idx, label_name in zip(ax_idxs, target_labels):
             ltc = ltcs[label_name]
             # Apply bandpass filter 1-30 Hz
-            ltc_data = mne.filter.filter_data(ltc[0], 1000, 1, 30)
+            ltc_data = mne.filter.filter_data(ltc[0], 1000, None, 30)
             times = ltc[1]
             axes[ax_idx].plot(
                 times,
@@ -952,8 +947,6 @@ def plot_ltc_group_stacked(ct, group_colors, target_labels, show_plots, save_plo
             )
             axes[ax_idx].set_title(label_name)
     for ax in axes.flat:
-        yformatter = FuncFormatter(lambda v, p: str(Quantity(v, "A")))
-        ax.yaxis.set_major_formatter(yformatter)
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("MNE Wert (A)")
         ax.legend(loc="upper right", fontsize="small")
@@ -992,7 +985,7 @@ def _plot_permutation_cluster_test(
     unit="A/m",
     ax=None,
     sfreq=1000,
-    hpass=1,
+    hpass=None,
     lpass=30,
     group_colors={},
     group_alphas={},
@@ -1065,9 +1058,6 @@ def _plot_permutation_cluster_test(
         #         color=(0.3, 0.3, 0.3),
         #         alpha=0.3,
         #     )
-    # Set readable yticks
-    yformatter = FuncFormatter(lambda v, p: str(Quantity(v, unit)))
-    ax.yaxis.set_major_formatter(yformatter)
     if show_plots:
         plt.show()
 
@@ -1105,7 +1095,7 @@ def evoked_temporal_cluster(
                         times = evoked.times
                         gfp = calculate_gfp(evoked)[ch_type]
                         # Apply bandpass filter 1-30 Hz
-                        gfp = mne.filter.filter_data(gfp, 1000, 1, 30)
+                        gfp = mne.filter.filter_data(gfp, 1000, None, 30)
                         datas[meeg.name] = gfp
                 if ct.pr.name == "Experiment1":
                     datas = _merge_measurements(datas)
@@ -1157,7 +1147,7 @@ def ltc_temporal_cluster(
                     # Assumes times is everywhere the same
                     times = ltc[1]
                     # Apply bandpass filter 1-30 Hz
-                    ltc_data = mne.filter.filter_data(ltc[0], 1000, 1, 30)
+                    ltc_data = mne.filter.filter_data(ltc[0], 1000, None, 30)
                     datas[label_name][meeg.name] = ltc_data
             if ct.pr.name == "Experiment1":
                 for label_name, data in datas.items():
@@ -1445,3 +1435,49 @@ def connectivity_geodesic_statistics(
         join(ct.pr.save_dir_averages, f"{ct.pr.name}_geodesic_statistics.txt"), "w"
     ) as f:
         f.write(results)
+
+
+def export_ltcs(ltc_target_dir, cluster_trial, ct):
+    for group_name in ct.pr.sel_groups:
+        group_dir = join(ltc_target_dir, group_name)
+        if not isdir(group_dir):
+            mkdir(group_dir)
+        group = Group(group_name, ct)
+        trial = cluster_trial.get(group_name, None)
+        for ltcs, meeg in group.load_items(obj_type="MEEG", data_type="ltc"):
+            ltcs = ltcs[trial]
+            for label_name, ltc in ltcs.items():
+                ltc_save_path = join(
+                    group_dir,
+                    f"{meeg.name}+{label_name}.npy",
+                )
+                np.save(ltc_save_path, ltc)
+                print(f"{meeg.name}: Saved {ltc_save_path}")
+
+
+def con_t_test(compare_groups, con_compare_labels, cluster_trial, ct):
+    for group_names in compare_groups:
+        data = dict()
+        for label1, label2 in con_compare_labels:
+            label_key = f"{label1}-{label2}"
+            data[label_key] = dict()
+            for group_name in group_names:
+                if group_name not in data[label_key]:
+                    data[label_key][group_name] = dict()
+                group = Group(group_name, ct)
+                trial = cluster_trial[group_name]
+                for con, meeg in group.load_items(obj_type="MEEG", data_type="src_con"):
+                    con = con[trial]["wpli"]
+                    freqs = con.freqs
+                    for freq_idx, freq in enumerate(freqs):
+                        label1_idx = con.names.index(label1)
+                        label2_idx = con.names.index(label2)
+                        data[label_key][group_name][meeg.name] = con.get_data("dense")[label1_idx, label2_idx, freq_idx]
+
+        for label_key in data:
+            X = list()
+            for group_name in data[label_key]:
+                X.append(_merge_measurements(data[label_key][group_name]))
+            X = np.asarray(X)
+            result = ttest_1samp(X[0] - X[1], 0, alternative="greater")
+            print(f"{' vs. '.join(group_names)} {label_key}: t={result.statistic}, p={result.pvalue}, conf_int={result.confidence_interval()}")
