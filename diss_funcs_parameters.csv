@@ -28,4 +28,4 @@ notch_frequencies;;Diss;50;;;FuncGui;
 eogecg_target;;Diss;Raw (Unfiltered);;;ComboGui;{'options': ['Raw (Unfiltered)', 'Raw (Filtered)']}
 label_pw_groups;;Diss;[];;;ListGui;
 ltc_target_dir;;Diss;"""""";;;PathGui;{'pick_mode': 'directory'}
-con_compare_labels;;s;[];;;ListGui;
+con_compare_labels;;Diss;[];;;ListGui;

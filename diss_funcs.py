@@ -731,6 +731,8 @@ def _merge_measurements(data_dict):
                             datas[key] = [value]
                 for key, value in datas.items():
                     new_data_dict[uk][key] = np.mean(value, axis=0)
+            else:
+                new_data_dict[uk] = np.mean(data_list)
 
     return new_data_dict
 
@@ -1455,29 +1457,40 @@ def export_ltcs(ltc_target_dir, cluster_trial, ct):
                 print(f"{meeg.name}: Saved {ltc_save_path}")
 
 
-def con_t_test(compare_groups, con_compare_labels, cluster_trial, ct):
-    for group_names in compare_groups:
-        data = dict()
-        for label1, label2 in con_compare_labels:
-            label_key = f"{label1}-{label2}"
-            data[label_key] = dict()
-            for group_name in group_names:
-                if group_name not in data[label_key]:
-                    data[label_key][group_name] = dict()
-                group = Group(group_name, ct)
-                trial = cluster_trial[group_name]
-                for con, meeg in group.load_items(obj_type="MEEG", data_type="src_con"):
-                    con = con[trial]["wpli"]
-                    freqs = con.freqs
-                    for freq_idx, freq in enumerate(freqs):
+def con_t_test(compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_trial, ct):
+    results = ""
+    for fidx, (fmin, fmax) in enumerate(zip(con_fmin, con_fmax)):
+        for group_names in compare_groups:
+            data = dict()
+            for label1, label2 in con_compare_labels:
+                label_key = f"{label1} | {label2}"
+                data[label_key] = dict()
+                for group_name in group_names:
+                    if group_name not in data[label_key]:
+                        data[label_key][group_name] = dict()
+                    group = Group(group_name, ct)
+                    trial = cluster_trial[group_name]
+                    for con, meeg in group.load_items(obj_type="MEEG", data_type="src_con"):
+                        con = con[trial]["wpli"]
+                        assert len(con.freqs) == len(con_fmin)
                         label1_idx = con.names.index(label1)
                         label2_idx = con.names.index(label2)
-                        data[label_key][group_name][meeg.name] = con.get_data("dense")[label1_idx, label2_idx, freq_idx]
+                        con_data = con.get_data("dense")[:, :, fidx]
+                        con_data += np.rot90(np.fliplr(con_data))
+                        data[label_key][group_name][meeg.name] = con_data[label1_idx, label2_idx]
 
-        for label_key in data:
-            X = list()
-            for group_name in data[label_key]:
-                X.append(_merge_measurements(data[label_key][group_name]))
-            X = np.asarray(X)
-            result = ttest_1samp(X[0] - X[1], 0, alternative="greater")
-            print(f"{' vs. '.join(group_names)} {label_key}: t={result.statistic}, p={result.pvalue}, conf_int={result.confidence_interval()}")
+            for label_key in data:
+                X = list()
+                for group_name in data[label_key]:
+                    merged = _merge_measurements(data[label_key][group_name])
+                    X.append(list(merged.values()))
+                X = np.asarray(X)
+                result = ttest_1samp(X[0] - X[1], 0, alternative="greater")
+                result_str = f"{' vs. '.join(group_names)}, {label_key}, {fmin}-{fmax} Hz: t={result.statistic}, p={result.pvalue}, conf_int={result.confidence_interval()}\n"
+                print(result_str)
+                results += result_str
+        results += "\n"
+    with open(
+        join(ct.pr.save_dir_averages, f"{ct.pr.name}_con_t_statistics.txt"), "w"
+    ) as f:
+        f.write(results)
