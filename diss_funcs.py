@@ -10,7 +10,8 @@ import mne
 import numpy as np
 import pandas as pd
 import scipy
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, gridspec
+from matplotlib.pyplot import colormaps
 from matplotlib.ticker import FuncFormatter
 from mne.minimum_norm import source_induced_power
 from mne.stats import permutation_cluster_test, permutation_cluster_1samp_test
@@ -1231,8 +1232,56 @@ def label_power(
                 meeg.save_dir, f"{meeg.name}-{meeg.p_preset}-{trial}-{label.name}.npy"
             )
             np.save(power_save_path, power)
-            del power, itc
-            gc.collect()
+
+
+def plot_label_power(ct, tfr_freqs, target_labels, cluster_trial, show_plots, n_jobs):
+    """Plot the label power and compute permutation-cluster statistics against 0."""
+    tfr_dict = dict()
+    for group_name in ct.pr.sel_groups:
+        tfr_dict[group_name] = dict()
+        group = Group(group_name, ct)
+        times = MEEG(group.group_list[0], ct).load_evokeds()[0].times
+        trial = cluster_trial[group_name]
+        for label_name in target_labels:
+            tfr_dict[group_name][label_name] = list()
+            for meeg in group.load_items(obj_type="MEEG", data_type=None):
+                power_save_path = join(
+                    meeg.save_dir,
+                    f"{meeg.name}-{meeg.p_preset}-{trial}-{label_name}.npy",
+                )
+                power = np.load(power_save_path)
+                tfr_dict[group_name][label_name].append(power)
+    for label_name in target_labels:
+        nrows, ncols, ax_idxs = _get_n_subplots(len(ct.pr.sel_groups))
+        fig, ax = plt.subplots(nrows, ncols, figsize=figsize)
+        fig.suptitle(label_name)
+        for group_name, ax_idx in zip(ct.pr.sel_groups, ax_idxs):
+            tfr_data = tfr_dict[group_name][label_name]
+            tfr_averaged = np.mean(tfr_data, axis=0)
+            # Exclude edge-artefacts
+            vmax = np.std(np.abs(tfr_averaged)) * 2
+            vmin = -vmax
+            im = ax[ax_idx].imshow(
+                tfr_averaged,
+                cmap=colormaps["rainbow"],
+                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
+                aspect="auto",
+                origin="lower",
+                vmin=vmin,
+                vmax=vmax,
+            )
+
+            ax[ax_idx].set_title(group_name)
+            ax[ax_idx].set_xlabel("Time (ms)")
+            ax[ax_idx].set_ylabel("Frequency (Hz)")
+            ax[ax_idx].label_outer()
+            plt.colorbar(im, ax=ax[ax_idx])
+        plt.tight_layout()
+        Group(label_name, ct).plot_save(
+            f"label_power_{label_name}", matplotlib_figure=fig
+        )
+    if show_plots:
+        plt.show()
 
 
 def label_power_cond_permclust(
@@ -1247,12 +1296,8 @@ def label_power_cond_permclust(
     """The power inside the given labels is compared between groups with a 1sample-permutation-cluster-test with clustering in time and frequency."""
     """As in Compute power and phase lock in label of the source space."""
     for group_names in label_pw_groups:
-        if len(group_names) == 1:
-            p_accept = 0.005
-            tail = 0
-        else:
-            p_accept = 0.15
-            tail = 1
+        p_accept = 0.05
+        tail = 1
         if len(group_names) > 2:
             raise ValueError("Only two groups allowed for comparison")
         nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
@@ -1260,6 +1305,8 @@ def label_power_cond_permclust(
         fig, ax = plt.subplots(
             nrows=nrows, ncols=ncols, sharex=True, sharey=True, figsize=fs
         )
+        ims = list()
+        diff_avgs = list()
         for label, ax_idx in zip(target_labels, ax_idxs):
             X = list()
             for group_name in group_names:
@@ -1278,7 +1325,6 @@ def label_power_cond_permclust(
                     group_powers.append(power)
                 group_powers = np.asarray(group_powers)
                 X.append(group_powers)
-
             # Also allow one sample (testing against 0)
             X = [np.transpose(x, (0, 2, 1)) for x in X]
             if len(X) == 2:
@@ -1304,34 +1350,39 @@ def label_power_cond_permclust(
                 if p_val <= p_accept:
                     T_obs_plot[c] = T_obs[c]
 
-            vmax = np.std(np.abs(T_obs)) * 3
-            vmin = -vmax
-
-            ax[ax_idx].imshow(
-                T_obs,
-                cmap=plt.cm.gray,
-                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
-                aspect="auto",
-                origin="lower",
-                vmin=vmin,
-                vmax=vmax,
-            )
+            diff_avg = np.mean(X, axis=0)
+            diff_avgs.append(diff_avg)
             im = ax[ax_idx].imshow(
-                T_obs_plot,
-                cmap=plt.cm.RdBu_r,
+                diff_avg,
+                cmap=colormaps["rainbow"],
                 extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
                 aspect="auto",
                 origin="lower",
-                vmin=vmin,
-                vmax=vmax,
+            )
+            ims.append(im)
+            ax[ax_idx].imshow(
+                T_obs_plot,
+                cmap=colormaps["Greys"],
+                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
+                aspect="auto",
+                origin="lower",
             )
             fig.colorbar(im, ax=ax[ax_idx])
-            ax[ax_idx].set_xlabel("Time (ms)")
-            ax[ax_idx].set_ylabel("Frequency (Hz)")
-            ax[ax_idx].label_outer()
+            if ax_idx[0] == nrows - 1:
+                ax[ax_idx].set_xlabel("Time (ms)")
+            if ax_idx[1] == 0:
+                ax[ax_idx].set_ylabel("Frequency (Hz)")
             ax[ax_idx].set_title(label)
-        plt_title = "-".join(group_names)
-        fig.suptitle(f"{plt_title} (cluster for p < {p_accept}), tail={tail}")
+        # Set vmin and vmax according to all averages for min/max
+        vmin = np.min(np.concatenate(diff_avgs))
+        vmax = np.max(np.concatenate(diff_avgs))
+        for im in ims:
+            im.set(clim=(vmin, vmax))
+
+        plt_title = "Difference " + "-".join(group_names)
+        fig.suptitle(
+            f"{plt_title} ({len(good_clusted_inds)} cluster for p < {p_accept}, tail={tail})"
+        )
         plt.tight_layout()
         Group("all", ct).plot_save(
             f"label_power_permclust_{plt_title}", matplotlib_figure=fig
@@ -1457,7 +1508,9 @@ def export_ltcs(ltc_target_dir, cluster_trial, ct):
                 print(f"{meeg.name}: Saved {ltc_save_path}")
 
 
-def con_t_test(compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_trial, ct):
+def con_t_test(
+    compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_trial, ct
+):
     results = ""
     for fidx, (fmin, fmax) in enumerate(zip(con_fmin, con_fmax)):
         for group_names in compare_groups:
@@ -1470,14 +1523,18 @@ def con_t_test(compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_t
                         data[label_key][group_name] = dict()
                     group = Group(group_name, ct)
                     trial = cluster_trial[group_name]
-                    for con, meeg in group.load_items(obj_type="MEEG", data_type="src_con"):
+                    for con, meeg in group.load_items(
+                        obj_type="MEEG", data_type="src_con"
+                    ):
                         con = con[trial]["wpli"]
                         assert len(con.freqs) == len(con_fmin)
                         label1_idx = con.names.index(label1)
                         label2_idx = con.names.index(label2)
                         con_data = con.get_data("dense")[:, :, fidx]
                         con_data += np.rot90(np.fliplr(con_data))
-                        data[label_key][group_name][meeg.name] = con_data[label1_idx, label2_idx]
+                        data[label_key][group_name][meeg.name] = con_data[
+                            label1_idx, label2_idx
+                        ]
 
             for label_key in data:
                 X = list()
