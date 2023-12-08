@@ -14,7 +14,11 @@ from matplotlib import pyplot as plt, gridspec
 from matplotlib.pyplot import colormaps
 from matplotlib.ticker import FuncFormatter
 from mne.minimum_norm import source_induced_power
-from mne.stats import permutation_cluster_test, permutation_cluster_1samp_test
+from mne.stats import (
+    permutation_cluster_test,
+    permutation_cluster_1samp_test,
+    fdr_correction,
+)
 from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
 from mne_pipeline_hd.pipeline.loading import Group, MEEG
 from quantiphy import Quantity
@@ -1508,15 +1512,30 @@ def export_ltcs(ltc_target_dir, cluster_trial, ct):
                 print(f"{meeg.name}: Saved {ltc_save_path}")
 
 
+def _apply_fdr(pvalues):
+    reject, pval_corrected = fdr_correction(pvalues, alpha=0.05, method="indep")
+    return pval_corrected
+
+
+def _significant_formatter(value):
+    value_str = f"{value:.3f}"
+    if value <= 0.05:
+        value_str = "\\textbf{" + value_str + "}"
+    return value_str
+
+
 def con_t_test(
     compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_trial, ct
 ):
-    results = ""
-    for fidx, (fmin, fmax) in enumerate(zip(con_fmin, con_fmax)):
-        for group_names in compare_groups:
+    for group_names in compare_groups:
+        results_df = pd.DataFrame(
+            index=[f"{lb1} -> {lb2}" for lb1, lb2 in con_compare_labels],
+            columns=[f"{fmin}-{fmax}" for fmin, fmax in zip(con_fmin, con_fmax)],
+        )
+        for fidx, (fmin, fmax) in enumerate(zip(con_fmin, con_fmax)):
             data = dict()
             for label1, label2 in con_compare_labels:
-                label_key = f"{label1} | {label2}"
+                label_key = f"{label1} -> {label2}"
                 data[label_key] = dict()
                 for group_name in group_names:
                     if group_name not in data[label_key]:
@@ -1536,18 +1555,32 @@ def con_t_test(
                             label1_idx, label2_idx
                         ]
 
-            for label_key in data:
+            for lb_idx, label_key in enumerate(data):
                 X = list()
                 for group_name in data[label_key]:
                     merged = _merge_measurements(data[label_key][group_name])
                     X.append(list(merged.values()))
                 X = np.asarray(X)
                 result = ttest_1samp(X[0] - X[1], 0, alternative="greater")
+                results_df.iloc[lb_idx, fidx] = result.pvalue
                 result_str = f"{' vs. '.join(group_names)}, {label_key}, {fmin}-{fmax} Hz: t={result.statistic}, p={result.pvalue}, conf_int={result.confidence_interval()}\n"
                 print(result_str)
-                results += result_str
-        results += "\n"
-    with open(
-        join(ct.pr.save_dir_averages, f"{ct.pr.name}_con_t_statistics.txt"), "w"
-    ) as f:
-        f.write(results)
+        # Apply FDR-Correction
+        corrected_df = results_df.apply(_apply_fdr)
+        latex_table = corrected_df.to_latex(
+            formatters=[
+                _significant_formatter for i in range(len(corrected_df.columns))
+            ],
+            caption=f"Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied zwischen {' und '.join(group_names)} in den Konnektivitäten aus {ct.pr.name}."
+                    f"Die Ergebnisse sind FDR-korrigiert.",
+            label=f"tab:con_t_test_{'-'.join(group_names)}"
+        )
+        with open(
+            join(
+                ct.pr.save_dir_averages,
+                f"{ct.pr.name}_{' vs. '.join(group_names)}_con_t_statistics.tex",
+            ),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write(latex_table)
