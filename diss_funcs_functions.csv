@@ -22,3 +22,5 @@ label_power_cond_permclust;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct
 connectivity_geodesic_statistics;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,cluster_trial,show_plots,save_plots,con_fmin,con_fmax
 export_ltcs;;Other;Preparation;Diss;False;False;;diss_funcs;diss_funcs;ltc_target_dir,cluster_trial,ct
 con_t_test;;Other;Compute;Diss;False;False;;diss_funcs;diss_funcs;compare_groups,con_compare_labels,cluster_trial,ct
+add_velo_meta;;MEEG;Preparation;Diss;False;False;;diss_funcs;diss_funcs;meeg
+plot_velo_evoked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group,show_plots

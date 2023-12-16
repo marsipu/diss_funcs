@@ -1,18 +1,17 @@
-import gc
 import itertools
-import logging
 import sys
 from collections import OrderedDict
+from functools import reduce
+from itertools import combinations
 from os import mkdir
-from os.path import join, isdir
+from os.path import isdir, join
 
 import mne
 import numpy as np
 import pandas as pd
 import scipy
-from matplotlib import pyplot as plt, gridspec
+from matplotlib import pyplot as plt
 from matplotlib.pyplot import colormaps
-from matplotlib.ticker import FuncFormatter
 from mne.minimum_norm import source_induced_power
 from mne.stats import (
     permutation_cluster_test,
@@ -20,8 +19,8 @@ from mne.stats import (
     fdr_correction,
 )
 from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
-from mne_pipeline_hd.pipeline.loading import Group, MEEG
-from quantiphy import Quantity
+from mne_pipeline_hd.pipeline.loading import Group
+from mne_pipeline_hd.pipeline.loading import MEEG
 from scipy.signal import find_peaks, savgol_filter
 from scipy.stats import ttest_1samp
 from sklearn.linear_model import LinearRegression
@@ -274,7 +273,7 @@ def get_ratings_laser(meeg, laser_target_event_id):
     rating_meta_pd.to_csv(file_path)
 
 
-def _add_events_meta(epochs, meta_pd):
+def _add_events_meta(epochs, meta_pd, meta_key):
     """Make sure, that meat-data is assigned to correct epoch
     (requires parameter "time" and "id" to be included in meta_pd)
     """
@@ -291,7 +290,7 @@ def _add_events_meta(epochs, meta_pd):
         meta_pd_filtered = pd.concat(
             [
                 meta_pd_filtered,
-                pd.Series({"time": miss_time, "id": miss_id, "rating": np.nan})
+                pd.Series({"time": miss_time, "id": miss_id, meta_key: np.nan})
                 .to_frame()
                 .T,
             ],
@@ -320,7 +319,7 @@ def add_ratings_meta(meeg):
     file_path = join(meeg.save_dir, f"{meeg.name}_{meeg.p_preset}_{file_name}.csv")
     ratings_pd = pd.read_csv(file_path, index_col=0)
 
-    _add_events_meta(epochs, ratings_pd)
+    _add_events_meta(epochs, ratings_pd, "ratings")
     meeg.save_epochs(epochs)
 
 
@@ -332,8 +331,208 @@ def remove_metadata(meeg):
 
 
 ##############################################################
-# Load-Cell
+# Events
 ##############################################################
+
+def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_by_msec):
+    raw = meeg.load_raw()  # No copy to consume less memory
+
+    # Binary Coding of 6 Stim Channels in Biomagenetism Lab Heidelberg
+    # prepare arrays
+    events = np.ndarray(shape=(0, 3), dtype=np.int32)
+    evs = list()
+    evs_tol = list()
+
+    # Find events for each stim channel, append sample values to list
+    evs.append(
+        mne.find_events(
+            raw,
+            min_duration=min_duration,
+            shortest_event=shortest_event,
+            stim_channel=["STI 001"],
+        )[:, 0]
+    )
+    evs.append(
+        mne.find_events(
+            raw,
+            min_duration=min_duration,
+            shortest_event=shortest_event,
+            stim_channel=["STI 002"],
+        )[:, 0]
+    )
+    evs.append(
+        mne.find_events(
+            raw,
+            min_duration=min_duration,
+            shortest_event=shortest_event,
+            stim_channel=["STI 003"],
+        )[:, 0]
+    )
+    evs.append(
+        mne.find_events(
+            raw,
+            min_duration=min_duration,
+            shortest_event=shortest_event,
+            stim_channel=["STI 004"],
+        )[:, 0]
+    )
+    evs.append(
+        mne.find_events(
+            raw,
+            min_duration=min_duration,
+            shortest_event=shortest_event,
+            stim_channel=["STI 005"],
+        )[:, 0]
+    )
+    evs.append(
+        mne.find_events(
+            raw,
+            min_duration=min_duration,
+            shortest_event=shortest_event,
+            stim_channel=["STI 006"],
+        )[:, 0]
+    )
+
+    for i in evs:
+        # delete events in each channel,
+        # which are too close too each other (1ms)
+        too_close = np.where(np.diff(i) <= 1)
+        if np.size(too_close) >= 1:
+            print(
+                f"Two close events (1ms) at samples "
+                f"{i[too_close] + raw.first_samp}, first deleted"
+            )
+            i = np.delete(i, too_close, 0)
+            evs[evs.index(i)] = i
+
+        # add tolerance to each value
+        i_tol = np.ndarray(shape=(0, 1), dtype=np.int32)
+        for t in i:
+            i_tol = np.append(i_tol, t - 1)
+            i_tol = np.append(i_tol, t)
+            i_tol = np.append(i_tol, t + 1)
+
+        evs_tol.append(i_tol)
+
+    # Get events from combinated Stim-Channels
+    equals = reduce(
+        np.intersect1d,
+        (evs_tol[0], evs_tol[1], evs_tol[2], evs_tol[3], evs_tol[4], evs_tol[5]),
+    )
+    # elimnate duplicated events
+    too_close = np.where(np.diff(equals) <= 1)
+    if np.size(too_close) >= 1:
+        equals = np.delete(equals, too_close, 0)
+        equals -= 1  # correction, because of shift with deletion
+
+    for q in equals:
+        if (
+            q not in events[:, 0]
+            and q not in events[:, 0] + 1
+            and q not in events[:, 0] - 1
+        ):
+            events = np.append(events, [[q, 0, 63]], axis=0)
+
+    for a, b, c, d, e in combinations(range(6), 5):
+        equals = reduce(
+            np.intersect1d, (evs_tol[a], evs_tol[b], evs_tol[c], evs_tol[d], evs_tol[e])
+        )
+        too_close = np.where(np.diff(equals) <= 1)
+        if np.size(too_close) >= 1:
+            equals = np.delete(equals, too_close, 0)
+            equals -= 1
+
+        for q in equals:
+            if (
+                q not in events[:, 0]
+                and q not in events[:, 0] + 1
+                and q not in events[:, 0] - 1
+            ):
+                events = np.append(
+                    events,
+                    [[q, 0, int(2**a + 2**b + 2**c + 2**d + 2**e)]],
+                    axis=0,
+                )
+
+    for a, b, c, d in combinations(range(6), 4):
+        equals = reduce(
+            np.intersect1d, (evs_tol[a], evs_tol[b], evs_tol[c], evs_tol[d])
+        )
+        too_close = np.where(np.diff(equals) <= 1)
+        if np.size(too_close) >= 1:
+            equals = np.delete(equals, too_close, 0)
+            equals -= 1
+
+        for q in equals:
+            if (
+                q not in events[:, 0]
+                and q not in events[:, 0] + 1
+                and q not in events[:, 0] - 1
+            ):
+                events = np.append(
+                    events, [[q, 0, int(2**a + 2**b + 2**c + 2**d)]], axis=0
+                )
+
+    for a, b, c in combinations(range(6), 3):
+        equals = reduce(np.intersect1d, (evs_tol[a], evs_tol[b], evs_tol[c]))
+        too_close = np.where(np.diff(equals) <= 1)
+        if np.size(too_close) >= 1:
+            equals = np.delete(equals, too_close, 0)
+            equals -= 1
+
+        for q in equals:
+            if (
+                q not in events[:, 0]
+                and q not in events[:, 0] + 1
+                and q not in events[:, 0] - 1
+            ):
+                events = np.append(
+                    events, [[q, 0, int(2**a + 2**b + 2**c)]], axis=0
+                )
+
+    for a, b in combinations(range(6), 2):
+        equals = np.intersect1d(evs_tol[a], evs_tol[b])
+        too_close = np.where(np.diff(equals) <= 1)
+        if np.size(too_close) >= 1:
+            equals = np.delete(equals, too_close, 0)
+            equals -= 1
+
+        for q in equals:
+            if (
+                q not in events[:, 0]
+                and q not in events[:, 0] + 1
+                and q not in events[:, 0] - 1
+            ):
+                events = np.append(events, [[q, 0, int(2**a + 2**b)]], axis=0)
+
+    # Get single-channel events
+    for i in range(6):
+        for e in evs[i]:
+            if (
+                e not in events[:, 0]
+                and e not in events[:, 0] + 1
+                and e not in events[:, 0] - 1
+            ):
+                events = np.append(events, [[e, 0, 2**i]], axis=0)
+
+    # sort only along samples(column 0)
+    events = events[events[:, 0].argsort()]
+
+    # apply latency correction
+    events[:, 0] = [
+        ts + np.round(adjust_timeline_by_msec * 10**-3 * raw.info["sfreq"])
+        for ts in events[:, 0]
+    ]
+
+    ids = np.unique(events[:, 2])
+    print("unique ID's found: ", ids)
+
+    if np.size(events) > 0:
+        meeg.save_events(events)
+    else:
+        print("No events found")
+
+
 def get_load_cell_events_regression_baseline(
     meeg,
     min_duration,
@@ -1315,7 +1514,7 @@ def label_power_cond_permclust(
             X = list()
             for group_name in group_names:
                 group = Group(group_name, ct)
-                group_powers = list()
+                group_powers = dict()
                 trial = cluster_trial.get(group_name, None)
                 assert trial is not None
                 times = MEEG(group.group_list[0], ct).load_evokeds()[0].times
@@ -1326,9 +1525,10 @@ def label_power_cond_permclust(
                         f"{meeg_name}-{group.p_preset}-{trial}-{label}.npy",
                     )
                     power = np.load(power_save_path)
-                    group_powers.append(power)
-                group_powers = np.asarray(group_powers)
-                X.append(group_powers)
+                    group_powers[meeg_name] = power
+                group_powers_merged = _merge_measurements(group_powers)
+                powers_array = np.asarray(list(group_powers_merged.values()))
+                X.append(powers_array)
             # Also allow one sample (testing against 0)
             X = [np.transpose(x, (0, 2, 1)) for x in X]
             if len(X) == 2:
@@ -1355,9 +1555,15 @@ def label_power_cond_permclust(
                     T_obs_plot[c] = T_obs[c]
 
             diff_avg = np.mean(X, axis=0)
+            time_idx = np.nonzero(np.round(times, 3) == 0.43)
+            tfr_idx = np.nonzero(np.round(tfr_freqs) == 50)
+            gpower_mean = diff_avg[time_idx, tfr_idx]
+            gpower_std = np.std(X, axis=0)[time_idx, tfr_idx]
+            print(f"Label {label}: mean={gpower_mean}, std={gpower_std}")
+
             diff_avgs.append(diff_avg)
             im = ax[ax_idx].imshow(
-                diff_avg,
+                diff_avg.T,
                 cmap=colormaps["rainbow"],
                 extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
                 aspect="auto",
@@ -1365,7 +1571,7 @@ def label_power_cond_permclust(
             )
             ims.append(im)
             ax[ax_idx].imshow(
-                T_obs_plot,
+                T_obs_plot.T,
                 cmap=colormaps["Greys"],
                 extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
                 aspect="auto",
@@ -1527,6 +1733,10 @@ def _significant_formatter(value):
 def con_t_test(
     compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_trial, ct
 ):
+    if not isinstance(con_fmin, list):
+        con_fmin = [con_fmin]
+    if not isinstance(con_fmax, list):
+        con_fmax = [con_fmax]
     for group_names in compare_groups:
         results_df = pd.DataFrame(
             index=[f"{lb1} -> {lb2}" for lb1, lb2 in con_compare_labels],
@@ -1584,3 +1794,50 @@ def con_t_test(
             encoding="utf-8",
         ) as f:
             f.write(latex_table)
+
+
+def add_velo_meta(meeg):
+    events = meeg.load_events()
+
+    file_name = "velo_meta"
+    file_path = join(meeg.save_dir, f"{meeg.name}_{meeg.p_preset}_{file_name}.csv")
+    velo_meta_pd = pd.DataFrame([], columns=["time", "id", "velo"], dtype=int)
+
+    target_times = events[np.nonzero(events[:, 2] == 4)][:, 0]
+
+    for velo, velo_id in zip((28, 56), (1, 2)):
+        time_points = events[np.nonzero(events[:, 2] == velo_id)][:, 0]
+        for tp in time_points:
+            diffs = np.abs(target_times - tp)
+            print(f"For {tp} Min-Diff={min(diffs)}")
+            time_result = target_times[np.argmin(diffs)]
+            time_dict = {
+                    "time": time_result,
+                    "id": 4,
+                    "velo": velo,
+                }
+            meta_series = pd.Series(time_dict)
+            velo_meta_pd = pd.concat(
+                [velo_meta_pd, meta_series.to_frame().T],
+                axis=0,
+                ignore_index=True,
+            )
+
+    velo_meta_pd = velo_meta_pd.sort_values(
+        "time", ascending=True, ignore_index=True
+    )
+    velo_meta_pd.to_csv(file_path)
+
+    epochs = meeg.load_epochs()
+    _add_events_meta(epochs, velo_meta_pd, "velo")
+    meeg.save_epochs(epochs)
+
+def plot_velo_evoked(group, show_plots):
+    evs = list()
+    for evokeds, meeg in group.load_items(data_type="evoked"):
+        evo = evokeds[0]
+        evo.comment = f"{meeg.name[-2:]} mm/s"
+        evs.append(evo)
+    evs = mne.equalize_channels(evs)
+    fig = mne.viz.plot_compare_evokeds(evs, title="Vergleich vertikale Geschwindigkeiten", show=show_plots)
+    group.plot_save("velo_comparision", matplotlib_figure=fig)
