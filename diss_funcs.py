@@ -17,6 +17,7 @@ from mne.stats import (
     permutation_cluster_test,
     permutation_cluster_1samp_test,
     fdr_correction,
+    bonferroni_correction,
 )
 from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
 from mne_pipeline_hd.pipeline.loading import Group
@@ -333,6 +334,7 @@ def remove_metadata(meeg):
 ##############################################################
 # Events
 ##############################################################
+
 
 def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_by_msec):
     raw = meeg.load_raw()  # No copy to consume less memory
@@ -1718,11 +1720,6 @@ def export_ltcs(ltc_target_dir, cluster_trial, ct):
                 print(f"{meeg.name}: Saved {ltc_save_path}")
 
 
-def _apply_fdr(pvalues):
-    reject, pval_corrected = fdr_correction(pvalues, alpha=0.05, method="indep")
-    return pval_corrected
-
-
 def _significant_formatter(value):
     value_str = f"{value:.3f}"
     if value <= 0.05:
@@ -1775,15 +1772,16 @@ def con_t_test(
                 results_df.iloc[lb_idx, fidx] = result.pvalue
                 result_str = f"{' vs. '.join(group_names)}, {label_key}, {fmin}-{fmax} Hz: t={result.statistic}, p={result.pvalue}, conf_int={result.confidence_interval()}\n"
                 print(result_str)
-        # Apply FDR-Correction
-        corrected_df = results_df.apply(_apply_fdr)
-        latex_table = corrected_df.to_latex(
+        # Apply Bonferroni-Correction
+        reject, pval_corrected = bonferroni_correction(np.asarray(results_df), alpha=0.05)
+        results_df.iloc[:, :] = pval_corrected
+        latex_table = results_df.to_latex(
             formatters=[
-                _significant_formatter for i in range(len(corrected_df.columns))
+                _significant_formatter for i in range(len(results_df.columns))
             ],
             caption=f"Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied zwischen {' und '.join(group_names)} in den Konnektivitäten aus {ct.pr.name}."
-                    f"Die Ergebnisse sind FDR-korrigiert.",
-            label=f"tab:con_t_test_{'-'.join(group_names)}"
+            f"Die Ergebnisse sind Bonferroni-korrigiert.",
+            label=f"tab:con_t_test_{'-'.join(group_names)}",
         )
         with open(
             join(
@@ -1812,10 +1810,10 @@ def add_velo_meta(meeg):
             print(f"For {tp} Min-Diff={min(diffs)}")
             time_result = target_times[np.argmin(diffs)]
             time_dict = {
-                    "time": time_result,
-                    "id": 4,
-                    "velo": velo,
-                }
+                "time": time_result,
+                "id": 4,
+                "velo": velo,
+            }
             meta_series = pd.Series(time_dict)
             velo_meta_pd = pd.concat(
                 [velo_meta_pd, meta_series.to_frame().T],
@@ -1823,14 +1821,13 @@ def add_velo_meta(meeg):
                 ignore_index=True,
             )
 
-    velo_meta_pd = velo_meta_pd.sort_values(
-        "time", ascending=True, ignore_index=True
-    )
+    velo_meta_pd = velo_meta_pd.sort_values("time", ascending=True, ignore_index=True)
     velo_meta_pd.to_csv(file_path)
 
     epochs = meeg.load_epochs()
     _add_events_meta(epochs, velo_meta_pd, "velo")
     meeg.save_epochs(epochs)
+
 
 def plot_velo_evoked(group, show_plots):
     evs = list()
@@ -1839,5 +1836,7 @@ def plot_velo_evoked(group, show_plots):
         evo.comment = f"{meeg.name[-2:]} mm/s"
         evs.append(evo)
     evs = mne.equalize_channels(evs)
-    fig = mne.viz.plot_compare_evokeds(evs, title="Vergleich vertikale Geschwindigkeiten", show=show_plots)
+    fig = mne.viz.plot_compare_evokeds(
+        evs, title="Vergleich vertikale Geschwindigkeiten", show=show_plots
+    )
     group.plot_save("velo_comparision", matplotlib_figure=fig)
