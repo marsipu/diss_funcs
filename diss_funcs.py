@@ -26,6 +26,7 @@ from scipy.signal import find_peaks, savgol_filter
 from scipy.stats import ttest_1samp
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
+from statannotations.Annotator import Annotator
 
 figsize = [9, 3]
 
@@ -1619,10 +1620,10 @@ def _connectivity_geodesic_dist(A, B):
         raise ValueError("A is not positive definite")
     if not np.all(np.linalg.eigvals(B) > 0):
         raise ValueError("B is not positive definite")
-
     eigenvals, _ = np.linalg.eig(np.linalg.inv(A).dot(B))
+    result = np.sqrt(np.sum(np.log(eigenvals) ** 2))
 
-    return np.sqrt(np.sum(np.log(eigenvals) ** 2))
+    return result
 
 
 def connectivity_geodesic_statistics(
@@ -1636,70 +1637,58 @@ def connectivity_geodesic_statistics(
 ):
     """This computes the geodesic distance between connectivity matrices of two groups,
     calculates a 1sample-t-test and plots the results."""
-    results = ""
+    import seaborn as sns
+    from statannotations.Annotator import Annotator
+
+    if not isinstance(con_fmin, list):
+        con_fmin = [con_fmin]
+    if not isinstance(con_fmax, list):
+        con_fmax = [con_fmax]
+
+    freq_pairs = list(zip(con_fmin, con_fmax))
+    x = "Vergleichsgruppen"
+    y = "Geodesische Distanz"
     fig, axes = plt.subplots(
-        ncols=len(compare_groups), sharex=True, sharey=True, figsize=[12, 3]
+        ncols=len(freq_pairs), sharex=True, sharey=True
     )
-    for ax_idx, group_names in enumerate(compare_groups):
-        if len(group_names) != 2:
-            raise ValueError("Group-Names of 'compare_groups' can only be two.")
-        results += f"{20 * '#'}\n{' vs '.join(group_names)}\n{20 * '#'}\n"
-        data = dict()
-        for group_name in group_names:
-            group = Group(group_name, ct)
-            trial = cluster_trial[group_name]
-            group_data = list()
-            for con, meeg in group.load_items(obj_type="MEEG", data_type="src_con"):
-                con = con[trial]["wpli"]
-                freqs = con.freqs
-                group_data.append(con)
-            data[group_name] = group_data
+    if not isinstance(axes, np.ndarray):
+        axes = [axes]
+    for freq_idx, freq in enumerate(freq_pairs):
+        df = pd.DataFrame([], columns=[x, y])
+        for group_names in compare_groups:
+            group_key = " - ".join(group_names)
+            if len(group_names) != 2:
+                raise ValueError("Group-Names of 'compare_groups' can only be two.")
+            data = list()
+            for group_name in group_names:
+                group = Group(group_name, ct)
+                trial = cluster_trial[group_name]
+                group_data = dict()
+                for con, meeg in group.load_items(obj_type="MEEG", data_type="src_con"):
+                    con = con[trial]["wpli"].get_data("dense")[:, :, freq_idx]
+                    group_data[meeg.name] = con
+                group_data = _merge_measurements(group_data)
+                data.append(group_data.values())
 
-        data1 = data[group_names[0]]
-        data2 = data[group_names[1]]
-
-        excluded_subs = 0
-        group_distances = list()
-        for freq_idx, freq in enumerate(freqs):
-            distances = list()
-            for sub_data1, sub_data2 in zip(data1, data2):
-                con1 = sub_data1.get_data("dense")[:, :, freq_idx]
-                con2 = sub_data2.get_data("dense")[:, :, freq_idx]
+            for sub_data1, sub_data2 in zip(data[0], data[1]):
                 try:
-                    distances.append(_connectivity_geodesic_dist(con1, con2))
+                    dist = _connectivity_geodesic_dist(sub_data1, sub_data2)
                 except ValueError as exc:
                     print(exc)
                     print(f"Connectivity-data will be excluded")
-                    excluded_subs += 1
+                else:
+                    df = pd.concat([df, pd.DataFrame({y:dist, x:group_key}, index=[0])], axis=0, ignore_index=True)
+        pairs = [i for i in itertools.combinations(np.unique(df[x]), 2)]
+        sns_ax = sns.boxplot(data=df, x=x, y=y, ax=axes[freq_idx])
+        annotator = Annotator(sns_ax, pairs, data=df, x=x, y=y)
+        annotator.configure(test="t-test_paired", comparisons_correction="Bonferroni",
+                            text_format="star", show_test_name=True, hide_non_significant=True)
+        annotator.apply_and_annotate()
 
-            print(f"{excluded_subs} subjects where excluded")
-            # 1-sample one-sided t-test with H0: mean(geo_dist) <= 0
-            result = ttest_1samp(distances, 0, alternative="greater")
-            group_distances.append(distances)
-            result_text = f"For {group_names[0]} vs {group_names[1]} at {freq:.1f} Hz the statistic for geodesic distance of connectivity is:\nmean = {np.mean(distances)}\nt = {result.statistic}\np = {result.pvalue}\n\n"
-            print(result_text)
-            results += result_text
-        axes[ax_idx].boxplot(group_distances)
-        axes[ax_idx].set_title(
-            "Connectivity geodesic distance for " + " vs. ".join(group_names)
-        )
-        axes[ax_idx].set_xlabel("Frequency (Hz)")
-        axes[ax_idx].set_ylabel("Geodesic distance")
-        axes[ax_idx].label_outer()
-
-    axes[ax_idx].set_xticks(
-        np.arange(1, len(con_fmin) + 1),
-        [f"{fmin}-{fmax}" for fmin, fmax in zip(con_fmin, con_fmax)],
-    )
-    plt.tight_layout()
     if show_plots:
         fig.show()
     if save_plots:
         Group(ct.pr.name, ct).plot_save("connectivity_geodesic_distances")
-    with open(
-        join(ct.pr.save_dir_averages, f"{ct.pr.name}_geodesic_statistics.txt"), "w"
-    ) as f:
-        f.write(results)
 
 
 def export_ltcs(ltc_target_dir, cluster_trial, ct):
@@ -1773,12 +1762,12 @@ def con_t_test(
                 result_str = f"{' vs. '.join(group_names)}, {label_key}, {fmin}-{fmax} Hz: t={result.statistic}, p={result.pvalue}, conf_int={result.confidence_interval()}\n"
                 print(result_str)
         # Apply Bonferroni-Correction
-        reject, pval_corrected = bonferroni_correction(np.asarray(results_df), alpha=0.05)
+        reject, pval_corrected = bonferroni_correction(
+            np.asarray(results_df), alpha=0.05
+        )
         results_df.iloc[:, :] = pval_corrected
         latex_table = results_df.to_latex(
-            formatters=[
-                _significant_formatter for i in range(len(results_df.columns))
-            ],
+            formatters=[_significant_formatter for i in range(len(results_df.columns))],
             caption=f"Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied zwischen {' und '.join(group_names)} in den Konnektivitäten aus {ct.pr.name}."
             f"Die Ergebnisse sind Bonferroni-korrigiert.",
             label=f"tab:con_t_test_{'-'.join(group_names)}",
