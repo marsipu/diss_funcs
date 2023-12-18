@@ -10,13 +10,13 @@ import mne
 import numpy as np
 import pandas as pd
 import scipy
+import seaborn as sns
 from matplotlib import pyplot as plt
 from matplotlib.pyplot import colormaps
 from mne.minimum_norm import source_induced_power
 from mne.stats import (
     permutation_cluster_test,
     permutation_cluster_1samp_test,
-    fdr_correction,
     bonferroni_correction,
 )
 from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
@@ -29,6 +29,7 @@ from sklearn.preprocessing import PolynomialFeatures
 from statannotations.Annotator import Annotator
 
 figsize = [9, 3]
+
 
 ##############################################################
 # Preparation
@@ -244,7 +245,7 @@ def get_ratings_laser(meeg, laser_target_event_id):
     first_idx = np.nonzero(np.diff(pre_ratings[:, 0], axis=0) < 200)[0]
     last_idx = first_idx + 1
     ratings = pre_ratings[first_idx]
-    ratings[:, 2] = (ratings[:, 2] % 10) * 10 + pre_ratings[last_idx][:, 2] % 10
+    ratings[:, 2] = (ratings[:, 2] - 1) * 10 + pre_ratings[last_idx][:, 2] - 1
 
     # Get time sample from target_event_id
     target_events = events[np.nonzero(events[:, 2] == laser_target_event_id)]
@@ -282,7 +283,7 @@ def _add_events_meta(epochs, meta_pd, meta_key):
     meta_pd_filtered = meta_pd.loc[
         meta_pd["id"].isin(epochs.event_id.values())
         & meta_pd["time"].isin(epochs.events[:, 0])
-    ]
+        ]
 
     metatimes = [int(t) for t in meta_pd_filtered["time"]]
 
@@ -430,9 +431,9 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
     for q in equals:
         if (
-            q not in events[:, 0]
-            and q not in events[:, 0] + 1
-            and q not in events[:, 0] - 1
+                q not in events[:, 0]
+                and q not in events[:, 0] + 1
+                and q not in events[:, 0] - 1
         ):
             events = np.append(events, [[q, 0, 63]], axis=0)
 
@@ -447,13 +448,13 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
         for q in equals:
             if (
-                q not in events[:, 0]
-                and q not in events[:, 0] + 1
-                and q not in events[:, 0] - 1
+                    q not in events[:, 0]
+                    and q not in events[:, 0] + 1
+                    and q not in events[:, 0] - 1
             ):
                 events = np.append(
                     events,
-                    [[q, 0, int(2**a + 2**b + 2**c + 2**d + 2**e)]],
+                    [[q, 0, int(2 ** a + 2 ** b + 2 ** c + 2 ** d + 2 ** e)]],
                     axis=0,
                 )
 
@@ -468,12 +469,12 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
         for q in equals:
             if (
-                q not in events[:, 0]
-                and q not in events[:, 0] + 1
-                and q not in events[:, 0] - 1
+                    q not in events[:, 0]
+                    and q not in events[:, 0] + 1
+                    and q not in events[:, 0] - 1
             ):
                 events = np.append(
-                    events, [[q, 0, int(2**a + 2**b + 2**c + 2**d)]], axis=0
+                    events, [[q, 0, int(2 ** a + 2 ** b + 2 ** c + 2 ** d)]], axis=0
                 )
 
     for a, b, c in combinations(range(6), 3):
@@ -485,12 +486,12 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
         for q in equals:
             if (
-                q not in events[:, 0]
-                and q not in events[:, 0] + 1
-                and q not in events[:, 0] - 1
+                    q not in events[:, 0]
+                    and q not in events[:, 0] + 1
+                    and q not in events[:, 0] - 1
             ):
                 events = np.append(
-                    events, [[q, 0, int(2**a + 2**b + 2**c)]], axis=0
+                    events, [[q, 0, int(2 ** a + 2 ** b + 2 ** c)]], axis=0
                 )
 
     for a, b in combinations(range(6), 2):
@@ -502,28 +503,28 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
         for q in equals:
             if (
-                q not in events[:, 0]
-                and q not in events[:, 0] + 1
-                and q not in events[:, 0] - 1
+                    q not in events[:, 0]
+                    and q not in events[:, 0] + 1
+                    and q not in events[:, 0] - 1
             ):
-                events = np.append(events, [[q, 0, int(2**a + 2**b)]], axis=0)
+                events = np.append(events, [[q, 0, int(2 ** a + 2 ** b)]], axis=0)
 
     # Get single-channel events
     for i in range(6):
         for e in evs[i]:
             if (
-                e not in events[:, 0]
-                and e not in events[:, 0] + 1
-                and e not in events[:, 0] - 1
+                    e not in events[:, 0]
+                    and e not in events[:, 0] + 1
+                    and e not in events[:, 0] - 1
             ):
-                events = np.append(events, [[e, 0, 2**i]], axis=0)
+                events = np.append(events, [[e, 0, 2 ** i]], axis=0)
 
     # sort only along samples(column 0)
     events = events[events[:, 0].argsort()]
 
     # apply latency correction
     events[:, 0] = [
-        ts + np.round(adjust_timeline_by_msec * 10**-3 * raw.info["sfreq"])
+        ts + np.round(adjust_timeline_by_msec * 10 ** -3 * raw.info["sfreq"])
         for ts in events[:, 0]
     ]
 
@@ -537,18 +538,18 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
 
 def get_load_cell_events_regression_baseline(
-    meeg,
-    min_duration,
-    shortest_event,
-    adjust_timeline_by_msec,
-    diff_window,
-    min_ev_distance,
-    max_ev_distance,
-    len_baseline,
-    baseline_limit,
-    regression_degree,
-    trig_channel,
-    n_jobs,
+        meeg,
+        min_duration,
+        shortest_event,
+        adjust_timeline_by_msec,
+        diff_window,
+        min_ev_distance,
+        max_ev_distance,
+        len_baseline,
+        baseline_limit,
+        regression_degree,
+        trig_channel,
+        n_jobs,
 ):
     """The events are extracted from the load-cell signal using a rolling-difference, baseline and regression."""
     # Load Raw and extract the load-cell-trigger-channel
@@ -620,13 +621,13 @@ def get_load_cell_events_regression_baseline(
         # Get Trigger-Time by finding the first samples going from peak crossing the baseline
         # (from baseline_limit with length=len_baseline)
         pre_baseline_mean = np.asarray(
-            eeg_series[pk - (len_baseline + baseline_limit) : pk - baseline_limit + 1]
+            eeg_series[pk - (len_baseline + baseline_limit): pk - baseline_limit + 1]
         ).mean()
         post_baseline_mean = np.asarray(
-            eeg_series[pk + baseline_limit : pk + baseline_limit + len_baseline + 1]
+            eeg_series[pk + baseline_limit: pk + baseline_limit + len_baseline + 1]
         ).mean()
-        pre_peak_data = np.flip(np.asarray(eeg_series[pk - min_ev_distance : pk + 1]))
-        post_peak_data = np.asarray(eeg_series[pk : pk + min_ev_distance + 1])
+        pre_peak_data = np.flip(np.asarray(eeg_series[pk - min_ev_distance: pk + 1]))
+        post_peak_data = np.asarray(eeg_series[pk: pk + min_ev_distance + 1])
         if pre_baseline_mean > post_baseline_mean:
             first_idx = pk - (pre_peak_data > pre_baseline_mean).argmax()
             last_idx = pk + (post_peak_data < post_baseline_mean).argmax()
@@ -678,8 +679,8 @@ def get_load_cell_events_regression_baseline(
             event_id_last = 9
 
         for timep, evid in zip(
-            [first_time, peak_time, last_time],
-            [event_id_first, event_id_middle, event_id_last],
+                [first_time, peak_time, last_time],
+                [event_id_first, event_id_middle, event_id_last],
         ):
             meta_dict = {
                 "time": timep,
@@ -759,10 +760,10 @@ def get_load_cell_events_regression_baseline(
             if idx == len(events_meta_dict) - 1:
                 # Fill the time before and after the last event
                 first_fill_time = first_time - (
-                    events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
+                        events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
                 )
                 last_fill_time = eeg_raw.n_times - (
-                    events_meta_dict[ev_idx]["last_time"] - eeg_raw.first_samp
+                        events_meta_dict[ev_idx]["last_time"] - eeg_raw.first_samp
                 )
                 reg_signal = np.concatenate(
                     [
@@ -775,7 +776,7 @@ def get_load_cell_events_regression_baseline(
             else:
                 # Fill the time between events
                 fill_time = first_time - (
-                    events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
+                        events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
                 )
                 reg_signal = np.concatenate(
                     [reg_signal, np.full(fill_time, best_y[0]), best_y]
@@ -797,11 +798,11 @@ def get_load_cell_events_regression_baseline(
 
 
 def _get_load_cell_epochs(
-    meeg,
-    trig_plt_time,
-    baseline_limit,
-    trig_channel,
-    apply_savgol=False,
+        meeg,
+        trig_plt_time,
+        baseline_limit,
+        trig_channel,
+        apply_savgol=False,
 ):
     raw = meeg.load_raw()
     eeg_raw = raw.copy().pick(trig_channel)
@@ -815,7 +816,7 @@ def _get_load_cell_epochs(
 
     # Exclude rating-trials
     for idx, trial in enumerate(
-        [t for t in meeg.sel_trials if any([s in t for s in ["Down", "Up"]])]
+            [t for t in meeg.sel_trials if any([s in t for s in ["Down", "Up"]])]
     ):
         selected_ev_id = {key: value for key, value in event_id.items() if key == trial}
         # if 'Last' in trial:
@@ -839,13 +840,13 @@ def _get_load_cell_epochs(
             epd = ep[0]
             half_idx = int(len(epd) / 2) + 1
             if "Last" in trial:
-                epd -= np.mean(epd[half_idx + baseline_limit :])
+                epd -= np.mean(epd[half_idx + baseline_limit:])
             else:
                 epd -= np.mean(epd[: half_idx - baseline_limit])
 
-            if np.mean(epd[half_idx + baseline_limit :]) < 0 and "Down" in trial:
+            if np.mean(epd[half_idx + baseline_limit:]) < 0 and "Down" in trial:
                 epd *= -1
-            elif np.mean(epd[half_idx + baseline_limit :]) > 0 and "Up" in trial:
+            elif np.mean(epd[half_idx + baseline_limit:]) > 0 and "Up" in trial:
                 epd *= -1
 
             if apply_savgol:
@@ -872,41 +873,30 @@ def _mean_of_different_lengths(data):
 
 def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
     """The Ratings of all groups are plotted together."""
-    fs = [figsize[0], figsize[1] * len(rating_groups)]
-    fig, ax = plt.subplots(len(rating_groups), 1, sharex=True, sharey=True, figsize=fs)
-    for idx, (group_title, group_names) in enumerate(rating_groups.items()):
-        for group_name in group_names:
-            group = Group(group_name, ct)
-            group_ratings = list()
-            for meeg in group.load_items(obj_type="MEEG", data_type=None):
-                file_name = "ratings_meta"
-                file_path = join(
-                    meeg.save_dir, f"{meeg.name}_{meeg.p_preset}_{file_name}.csv"
-                )
-                ratings_pd = pd.read_csv(file_path, index_col=0)
-                ratings = ratings_pd["rating"].values
-                group_ratings.append(ratings)
-            group_mean, group_std = _mean_of_different_lengths(group_ratings)
-            ax[idx].plot(
-                group_mean, color=group_colors[group_name], alpha=1, label=group_name
+    x = "Probanden"
+    y = "Rating"
+    hue = "Stimulation"
+    df = pd.DataFrame([], columns=[x, y])
+    plt.figure(figsize=figsize)
+    for group_name in rating_groups:
+        group = Group(group_name, ct)
+        for idx, meeg in enumerate(group.load_items(obj_type="MEEG", data_type=None)):
+            file_name = "ratings_meta"
+            file_path = join(
+                meeg.save_dir, f"{meeg.name}_{meeg.p_preset}_{file_name}.csv"
             )
-            ax[idx].fill_between(
-                x=np.arange(len(group_mean)),
-                y1=group_mean - group_std,
-                y2=group_mean + group_std,
-                alpha=0.3,
-                color=group_colors[group_name],
-            )
-        ax[idx].set_xlabel("Epochs")
-        ax[idx].set_ylabel("Rating")
-        ax[idx].legend()
-        ax[idx].set_title(group_title)
-        # Hide inner labels
-        ax[idx].label_outer()
-    Group(ct.pr.name, ct).plot_save("ratings_combined")
+            ratings_pd = pd.read_csv(file_path, index_col=0)
+            ratings = ratings_pd["rating"].values
+            for rat in ratings:
+                df = pd.concat([df, pd.DataFrame({y: rat, x: idx + 1, hue: group_name}, index=[0])], axis=0,
+                               ignore_index=True, )
+
+    sns.boxplot(data=df, x=x, y=y, hue=hue, palette=group_colors)
+
+    # Group(ct.pr.name, ct).plot_save("ratings_combined")
 
     if show_plots:
-        fig.show()
+        plt.show()
 
 
 def _merge_measurements(data_dict):
@@ -982,7 +972,7 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
             for query_trial in rating_queries:
                 gfps[query_trial] = dict()
                 for evokeds, meeg in group.load_items(
-                    obj_type="MEEG", data_type="evoked"
+                        obj_type="MEEG", data_type="evoked"
                 ):
                     try:
                         evoked = [ev for ev in evokeds if ev.comment == query_trial][0]
@@ -1033,13 +1023,13 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
 
 
 def plot_load_cell_group_ave(
-    ct,
-    trig_plt_time,
-    baseline_limit,
-    show_plots,
-    apply_savgol,
-    trig_channel,
-    group_colors,
+        ct,
+        trig_plt_time,
+        baseline_limit,
+        show_plots,
+        apply_savgol,
+        trig_channel,
+        group_colors,
 ):
     """The Load-Cell-Signal is plotted for all groups and subjects."""
     groups = [g for g in ct.pr.sel_groups if "Laser" not in g]
@@ -1183,21 +1173,21 @@ def _get_threshold(p_value, n_observations, tail=0):
 
 
 def _plot_permutation_cluster_test(
-    group_data,
-    times,
-    group_names,
-    one_sample=False,
-    show_plots=False,
-    n_permutations=1000,
-    tail=0,
-    n_jobs=-1,
-    unit="A/m",
-    ax=None,
-    sfreq=1000,
-    hpass=None,
-    lpass=30,
-    group_colors={},
-    group_alphas={},
+        group_data,
+        times,
+        group_names,
+        one_sample=False,
+        show_plots=False,
+        n_permutations=1000,
+        tail=0,
+        n_jobs=-1,
+        unit="A/m",
+        ax=None,
+        sfreq=1000,
+        hpass=None,
+        lpass=30,
+        group_colors={},
+        group_alphas={},
 ):
     # Compute permutation cluster test
     if one_sample:
@@ -1272,7 +1262,7 @@ def _plot_permutation_cluster_test(
 
 
 def evoked_temporal_cluster(
-    ct, ch_types, group_colors, compare_groups, cluster_trial, n_jobs, show_plots
+        ct, ch_types, group_colors, compare_groups, cluster_trial, n_jobs, show_plots
 ):
     """A 1sample-permutation-cluster-test with clustering in time is performed between the evoked of two stimulus-groups."""
     from mne_pipeline_hd.pipeline.loading import Group
@@ -1294,7 +1284,7 @@ def evoked_temporal_cluster(
                 trial = cluster_trial.get(group_name)
                 datas = dict()
                 for evokeds, meeg in group.load_items(
-                    obj_type="MEEG", data_type="evoked"
+                        obj_type="MEEG", data_type="evoked"
                 ):
                     try:
                         evoked = [ev for ev in evokeds if ev.comment == trial][0]
@@ -1341,7 +1331,7 @@ def evoked_temporal_cluster(
 
 
 def ltc_temporal_cluster(
-    ct, compare_groups, group_colors, target_labels, cluster_trial, n_jobs, show_plots
+        ct, compare_groups, group_colors, target_labels, cluster_trial, n_jobs, show_plots
 ):
     """A 1sample-permutation-cluster-test with clustering in time is performed between the label-time-courses of two stimulus-groups."""
     for group_names in compare_groups:
@@ -1402,13 +1392,13 @@ def ltc_temporal_cluster(
 
 
 def label_power(
-    meeg,
-    tfr_freqs,
-    inverse_method,
-    target_labels,
-    tfr_baseline,
-    tfr_baseline_mode,
-    n_jobs,
+        meeg,
+        tfr_freqs,
+        inverse_method,
+        target_labels,
+        tfr_baseline,
+        tfr_baseline_mode,
+        n_jobs,
 ):
     """The power inside the given labels is computed and saved."""
     inv_op = meeg.load_inverse_operator()
@@ -1491,13 +1481,13 @@ def plot_label_power(ct, tfr_freqs, target_labels, cluster_trial, show_plots, n_
 
 
 def label_power_cond_permclust(
-    ct,
-    label_pw_groups,
-    tfr_freqs,
-    target_labels,
-    cluster_trial,
-    n_jobs,
-    show_plots,
+        ct,
+        label_pw_groups,
+        tfr_freqs,
+        target_labels,
+        cluster_trial,
+        n_jobs,
+        show_plots,
 ):
     """The power inside the given labels is compared between groups with a 1sample-permutation-cluster-test with clustering in time and frequency."""
     """As in Compute power and phase lock in label of the source space."""
@@ -1627,18 +1617,16 @@ def _connectivity_geodesic_dist(A, B):
 
 
 def connectivity_geodesic_statistics(
-    ct,
-    compare_groups,
-    cluster_trial,
-    show_plots,
-    save_plots,
-    con_fmin,
-    con_fmax,
+        ct,
+        compare_groups,
+        cluster_trial,
+        show_plots,
+        save_plots,
+        con_fmin,
+        con_fmax,
 ):
     """This computes the geodesic distance between connectivity matrices of two groups,
     calculates a 1sample-t-test and plots the results."""
-    import seaborn as sns
-    from statannotations.Annotator import Annotator
 
     if not isinstance(con_fmin, list):
         con_fmin = [con_fmin]
@@ -1677,7 +1665,7 @@ def connectivity_geodesic_statistics(
                     print(exc)
                     print(f"Connectivity-data will be excluded")
                 else:
-                    df = pd.concat([df, pd.DataFrame({y:dist, x:group_key}, index=[0])], axis=0, ignore_index=True)
+                    df = pd.concat([df, pd.DataFrame({y: dist, x: group_key}, index=[0])], axis=0, ignore_index=True)
         pairs = [i for i in itertools.combinations(np.unique(df[x]), 2)]
         sns_ax = sns.boxplot(data=df, x=x, y=y, ax=axes[freq_idx])
         annotator = Annotator(sns_ax, pairs, data=df, x=x, y=y)
@@ -1717,7 +1705,7 @@ def _significant_formatter(value):
 
 
 def con_t_test(
-    compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_trial, ct
+        compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_trial, ct
 ):
     if not isinstance(con_fmin, list):
         con_fmin = [con_fmin]
@@ -1739,7 +1727,7 @@ def con_t_test(
                     group = Group(group_name, ct)
                     trial = cluster_trial[group_name]
                     for con, meeg in group.load_items(
-                        obj_type="MEEG", data_type="src_con"
+                            obj_type="MEEG", data_type="src_con"
                     ):
                         con = con[trial]["wpli"]
                         assert len(con.freqs) == len(con_fmin)
@@ -1769,16 +1757,16 @@ def con_t_test(
         latex_table = results_df.to_latex(
             formatters=[_significant_formatter for i in range(len(results_df.columns))],
             caption=f"Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied zwischen {' und '.join(group_names)} in den Konnektivitäten aus {ct.pr.name}."
-            f"Die Ergebnisse sind Bonferroni-korrigiert.",
+                    f"Die Ergebnisse sind Bonferroni-korrigiert.",
             label=f"tab:con_t_test_{'-'.join(group_names)}",
         )
         with open(
-            join(
-                ct.pr.save_dir_averages,
-                f"{ct.pr.name}_{' vs. '.join(group_names)}_con_t_statistics.tex",
-            ),
-            "w",
-            encoding="utf-8",
+                join(
+                    ct.pr.save_dir_averages,
+                    f"{ct.pr.name}_{' vs. '.join(group_names)}_con_t_statistics.tex",
+                ),
+                "w",
+                encoding="utf-8",
         ) as f:
             f.write(latex_table)
 

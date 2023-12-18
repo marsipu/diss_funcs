@@ -1,6 +1,6 @@
 ;alias;group;default;unit;description;gui_type;gui_args
 compare_groups;;Diss;[];;;ListGui;
-rating_groups;;Diss;{};;;DictGui;
+rating_groups;;Diss;{};;;ListGui;
 group_colors;;Diss;{};;Select colors for group-names;ColorGui;{'keys': ['Laser', 'High', 'Low', 'Middle', 'Tactile']}
 label_combinations;;Diss;{};;Label combinations with list of label-names as value;DictGui;
 n_eeg_channels;;Diss;64;;How many EEG-Channels were digitized;IntGui;

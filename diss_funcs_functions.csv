@@ -13,7 +13,7 @@ plot_gfp_group_stacked;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,gro
 plot_ltc_group_stacked;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,target_labels,show_plots,cluster_trial
 plot_ratings_evoked_comparision;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,group_colors,show_plots,n_jobs
 plot_load_cell_group_ave;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,trig_plt_time,baseline_limit,show_plots,apply_savgol,trig_channel
-plot_ratings_combined;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,show_plots
+plot_ratings_combined;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,rating_groups,show_plots
 evoked_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,group_colors,compare_groups,cluster_trial,n_jobs,show_plots
 ltc_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,group_colors,target_labels,cluster_trial,n_jobs,show_plots
 label_power;;MEEG;Compute;Diss;False;False;;diss_funcs;diss_funcs;meeg,tfr_freqs,inverse_method,target_labels,baseline,tfr_baseline_mode,n_jobs
