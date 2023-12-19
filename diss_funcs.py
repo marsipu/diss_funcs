@@ -1,4 +1,5 @@
 import itertools
+import re
 import sys
 from collections import OrderedDict
 from functools import reduce
@@ -876,30 +877,41 @@ def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
     x = "Probanden"
     y = "Rating"
     hue = "Stimulation"
-    df = pd.DataFrame([], columns=[x, y])
-    plt.figure(figsize=figsize)
-    for group_name in rating_groups:
-        group = Group(group_name, ct)
-        for idx, meeg in enumerate(group.load_items(obj_type="MEEG", data_type=None)):
-            file_name = "ratings_meta"
-            file_path = join(
-                meeg.save_dir, f"{meeg.name}_{meeg.p_preset}_{file_name}.csv"
-            )
-            ratings_pd = pd.read_csv(file_path, index_col=0)
-            ratings = ratings_pd["rating"].values
-            for rat in ratings:
-                df = pd.concat([df, pd.DataFrame({y: rat, x: idx + 1, hue: group_name}, index=[0])], axis=0,
-                               ignore_index=True, )
+    fs = [figsize[0], figsize[1] * 2]
+    fig, axes = plt.subplots(2, 1, figsize=fs)
+    for ax_idx, (title, groups) in enumerate(rating_groups.items()):
+        df = pd.DataFrame([], columns=[x, y])
+        for group_name in groups:
+            group = Group(group_name, ct)
+            rating_dict = dict()
+            for meeg in group.load_items(obj_type="MEEG", data_type=None):
+                file_name = "ratings_meta"
+                file_path = join(
+                    meeg.save_dir, f"{meeg.name}_{meeg.p_preset}_{file_name}.csv"
+                )
+                ratings_pd = pd.read_csv(file_path, index_col=0)
+                ratings = ratings_pd["rating"].values
+                rating_dict[meeg.name] = ratings
 
-    sns.boxplot(data=df, x=x, y=y, hue=hue, palette=group_colors)
+            rating_dict = _merge_measurements(rating_dict, combine="combine")
+            for idx, (meeg_name, ratings) in enumerate(rating_dict.items()):
+                for rat in ratings:
+                    df = pd.concat([df, pd.DataFrame({y: rat, x: idx + 1, hue: group_name}, index=[0])], axis=0,
+                                   ignore_index=True, )
 
-    # Group(ct.pr.name, ct).plot_save("ratings_combined")
+        sns.boxplot(data=df, x=x, y=y, hue=hue, palette=group_colors, ax=axes[ax_idx])
+        axes[ax_idx].set_title(title)
+        axes[ax_idx].label_outer()
+
+    Group(ct.pr.name, ct).plot_save("ratings_combined")
+
+    plt.tight_layout()
 
     if show_plots:
         plt.show()
 
 
-def _merge_measurements(data_dict):
+def _merge_measurements(data_dict, combine="mean"):
     # Find pairs of measurments from Experiment 1
     new_data_dict = OrderedDict()
     keys = np.asarray(list(data_dict.keys()))
@@ -913,9 +925,13 @@ def _merge_measurements(data_dict):
         if len(data_list) == 1:
             new_data_dict[dk] = data_dict[dk]
         else:
-            # Take mean if data is of numpy-arrays
+            # Take mean if data is of numpy-arrays (only optionpossible)
             if isinstance(data_list[0], np.ndarray):
-                new_data_dict[uk] = np.mean(data_list, axis=0)
+                if combine == "mean":
+                    res = np.mean(data_list, axis=0)
+                else:
+                    res = np.concatenate(data_list, axis=0)
+                new_data_dict[uk] = res
             # Preserve dictionary with one level (e.g. channel-types or labels)
             elif isinstance(data_list[0], dict):
                 new_data_dict[uk] = dict()
@@ -927,7 +943,17 @@ def _merge_measurements(data_dict):
                         else:
                             datas[key] = [value]
                 for key, value in datas.items():
-                    new_data_dict[uk][key] = np.mean(value, axis=0)
+                    if combine == "mean":
+                        value = np.mean(value, axis=0)
+                    new_data_dict[uk][key] = value
+            # List is only for rating-combination (not mean)
+            elif isinstance(data_list[0], list):
+                if combine == "mean":
+                    res = np.mean(data_list, axis=0)
+                else:
+                    res = np.concatenate(data_list, axis=0)
+                res = list(res)
+                new_data_dict[uk] = res
             else:
                 new_data_dict[uk] = np.mean(data_list)
 
@@ -1817,3 +1843,105 @@ def plot_velo_evoked(group, show_plots):
         evs, title="Vergleich vertikale Geschwindigkeiten", show=show_plots
     )
     group.plot_save("velo_comparision", matplotlib_figure=fig)
+
+def _get_group(meeg_name, groups):
+    for group_name, group in groups.items():
+        if meeg_name in group:
+            return group_name
+    return None
+
+def combine_meegs_rating(meeg, combine_groups):
+    group_names = dict()
+    for group_name in combine_groups:
+        group_names[group_name] = Group(group_name, meeg.ct).group_list
+    if _get_group(meeg.name, group_names) is not None:
+        first_pattern = r"_(\w{0,7})([ab_]*)"
+        pattern = r"([p,l]{2}\d{1,2}a?)" + first_pattern
+        match = re.match(pattern, meeg.name)
+        sub_name = match.group(1)
+        new_high_name = f"{sub_name}_combined_high"
+        new_low_name = f"{sub_name}_combined_low"
+        if new_high_name in meeg.pr.all_meeg and new_low_name in meeg.pr.all_meeg:
+            print(f"{meeg.name} already combined")
+            return
+        all_epochs = [meeg.load_epochs()]
+        stims = [_get_group(meeg.name, group_names)]
+        for other_meeg in [m for m in meeg.pr.all_meeg if m!=meeg.name and _get_group(m, group_names) is not None]:
+            match = re.match(sub_name + first_pattern, other_meeg)
+            if match:
+                all_epochs.append(MEEG(other_meeg, meeg.ct).load_epochs())
+                stims.append(_get_group(other_meeg, group_names))
+                print(f"Found {other_meeg} for {meeg.name}")
+
+        new_id = 1
+        all_epochs = mne.channels.equalize_channels(all_epochs)
+        epochs = all_epochs[0]
+        new_data = epochs.get_data()
+        new_events = epochs.events.copy()
+        new_events[:, 2] = new_id
+        new_metadata = epochs.metadata.copy()
+        new_metadata["Stimulus"] = stims[0]
+        new_metadata["id"] = new_id
+
+        for epo, stim in zip(all_epochs[1:], stims[1:]):
+            new_data = np.concatenate((new_data, epo.get_data()), axis=0)
+            e2_events = epo.events.copy()
+            ev_offset = new_events[-1, 0] + 10
+            e2_events[:, 0] += ev_offset
+            e2_events[:, 2] = new_id
+            new_events = np.concatenate((new_events, e2_events), axis=0)
+            meta2 = epo.metadata.copy()
+            meta2["time"] += ev_offset
+            meta2["Stimulus"] = stim
+            meta2["id"] = new_id
+            new_metadata = pd.concat([new_metadata, meta2], axis=0, ignore_index=True)
+
+        combined_epochs = mne.EpochsArray(new_data, epochs.info, new_events, tmin=epochs.tmin,
+                                          event_id={"Stimulation": 1},
+                                          baseline=epochs.baseline, metadata=new_metadata)
+        epochs_high = combined_epochs[combined_epochs.metadata.reset_index().sort_values(by="rating").index[len(combined_epochs)//2:]]
+        epochs_low = combined_epochs[combined_epochs.metadata.reset_index().sort_values(by="rating").index[:len(combined_epochs)//2]]
+        for name, epoch, group_name in zip([new_high_name, new_low_name], [epochs_high, epochs_low], ["Hohes Rating (median split)", "Niedriges Rating (median split)"]):
+            new_meeg = meeg.pr.add_meeg(name)
+            meeg.pr.meeg_to_fsmri[name] = meeg.fsmri.name
+            meeg.pr.sel_event_id[name] = meeg.sel_trials
+            meeg.pr.meeg_event_id[name] = meeg.event_id
+            new_meeg.save_epochs(epoch)
+            print(f"Combined {len(all_epochs)} measurements to {name}")
+            if group_name not in meeg.pr.all_groups:
+                meeg.pr.all_groups[group_name] = [name]
+            else:
+                meeg.pr.all_groups[group_name].append(name)
+    meeg.pr.save()
+
+
+def plot_rating_share(ct, combine_groups, show_plots):
+    fs = [figsize[0], figsize[1] * 2]
+    fig, ax = plt.subplots(2, 1, figsize=fs)
+    for ax_idx, rat_group in enumerate(["Hohes Rating (median split)", "Niedriges Rating (median split)"]):
+        group = Group(rat_group, ct)
+        bottom = np.zeros(len(group.group_list))
+        vals = {g: list() for g in combine_groups}
+        for epochs, meeg in group.load_items(data_type="epochs"):
+            val_dict = epochs.metadata.value_counts("Stimulus").to_dict()
+            for k in combine_groups:
+                if k in val_dict:
+                    vals[k].append(val_dict[k])
+                else:
+                    vals[k].append(0)
+        for k, v in vals.items():
+            p = ax[ax_idx].bar([str(i) for i in range(1, len(group.group_list) + 1)], v, bottom=bottom, label=k)
+            bottom += v
+
+            ax[ax_idx].bar_label(p, label_type="center")
+        ax[ax_idx].set_title(rat_group)
+        ax[ax_idx].set_ylabel("Anzahl der Stimuli")
+        ax[ax_idx].set_xlabel("Proband")
+        ax[ax_idx].legend()
+
+    plt.tight_layout()
+
+    if show_plots:
+        plt.show()
+
+    group.plot_save("rating_share", matplotlib_figure=fig)

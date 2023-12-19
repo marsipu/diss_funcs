@@ -24,3 +24,5 @@ export_ltcs;;Other;Preparation;Diss;False;False;;diss_funcs;diss_funcs;ltc_targe
 con_t_test;;Other;Compute;Diss;False;False;;diss_funcs;diss_funcs;compare_groups,con_compare_labels,cluster_trial,ct
 add_velo_meta;;MEEG;Preparation;Diss;False;False;;diss_funcs;diss_funcs;meeg
 plot_velo_evoked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group,show_plots
+combine_meegs_rating;;MEEG;Ratings;Diss;False;False;;diss_funcs;diss_funcs;meeg,combine_groups
+plot_rating_share;;Other;Ratings;Diss;True;False;;diss_funcs;diss_funcs;ct
