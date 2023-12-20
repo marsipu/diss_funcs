@@ -1661,9 +1661,10 @@ def connectivity_geodesic_statistics(
 
     freq_pairs = list(zip(con_fmin, con_fmax))
     x = "Vergleichsgruppen"
-    y = "Geodesische Distanz"
+    y = "Geodätische Distanz"
+    fs = (figsize[0], figsize[1] * len(freq_pairs))
     fig, axes = plt.subplots(
-        ncols=len(freq_pairs), sharex=True, sharey=True
+        nrows=len(freq_pairs), sharex=True, sharey=True, figsize=fs
     )
     if not isinstance(axes, np.ndarray):
         axes = [axes]
@@ -1694,11 +1695,14 @@ def connectivity_geodesic_statistics(
                     df = pd.concat([df, pd.DataFrame({y: dist, x: group_key}, index=[0])], axis=0, ignore_index=True)
         pairs = [i for i in itertools.combinations(np.unique(df[x]), 2)]
         sns_ax = sns.boxplot(data=df, x=x, y=y, ax=axes[freq_idx])
+        axes[freq_idx].set_title(f"{freq[0]}-{freq[1]} Hz")
+        axes[freq_idx].label_outer()
         annotator = Annotator(sns_ax, pairs, data=df, x=x, y=y)
         annotator.configure(test="t-test_paired", comparisons_correction="Bonferroni",
                             text_format="star", show_test_name=True, hide_non_significant=True)
         annotator.apply_and_annotate()
 
+    plt.tight_layout()
     if show_plots:
         fig.show()
     if save_plots:
