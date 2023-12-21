@@ -1905,7 +1905,7 @@ def combine_meegs_rating(meeg, combine_groups):
                                           baseline=epochs.baseline, metadata=new_metadata)
         epochs_high = combined_epochs[combined_epochs.metadata.reset_index().sort_values(by="rating").index[len(combined_epochs)//2:]]
         epochs_low = combined_epochs[combined_epochs.metadata.reset_index().sort_values(by="rating").index[:len(combined_epochs)//2]]
-        for name, epoch, group_name in zip([new_high_name, new_low_name], [epochs_high, epochs_low], ["Hohes Rating (median split)", "Niedriges Rating (median split)"]):
+        for name, epoch, group_name in zip([new_high_name, new_low_name], [epochs_high, epochs_low], ["Hohes Rating", "Niedriges Rating"]):
             new_meeg = meeg.pr.add_meeg(name)
             meeg.pr.meeg_to_fsmri[name] = meeg.fsmri.name
             meeg.pr.sel_event_id[name] = meeg.sel_trials
@@ -1922,7 +1922,7 @@ def combine_meegs_rating(meeg, combine_groups):
 def plot_rating_share(ct, combine_groups, show_plots):
     fs = [figsize[0], figsize[1] * 2]
     fig, ax = plt.subplots(2, 1, figsize=fs)
-    for ax_idx, rat_group in enumerate(["Hohes Rating (median split)", "Niedriges Rating (median split)"]):
+    for ax_idx, rat_group in enumerate(["Hohes Rating", "Niedriges Rating"]):
         group = Group(rat_group, ct)
         bottom = np.zeros(len(group.group_list))
         vals = {g: list() for g in combine_groups}
