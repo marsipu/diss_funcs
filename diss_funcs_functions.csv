@@ -1,6 +1,6 @@
 ;alias;target;tab;group;matplotlib;mayavi;dependencies;module;pkg_name;func_args
 combine_labels;;FSMRI;Preparation;Diss;False;False;;diss_funcs;diss_funcs;fsmri,label_combinations
-change_trig_channel_type;;MEEG;Preparation;Diss;False;False;;diss_funcs;diss_funcs;meeg, trig_channel
+change_trig_channel_type;;MEEG;Preparation;Diss;False;False;;diss_funcs;diss_funcs;meeg,trig_channel
 rereference_eog;;MEEG;Preparation;Diss;False;False;;diss_funcs;diss_funcs;meeg,eog_tuple
 get_dig_eegs;;MEEG;Preparation;Diss;False;False;;diss_funcs;diss_funcs;meeg,n_eeg_channels,eeg_dig_first
 pl1_laser_event_correction;;MEEG;Preparation;Diss;False;False;;diss_funcs;diss_funcs;meeg
@@ -17,7 +17,7 @@ plot_ratings_combined;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,rati
 evoked_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,group_colors,compare_groups,cluster_trial,n_jobs,show_plots
 ltc_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,group_colors,target_labels,cluster_trial,n_jobs,show_plots
 label_power;;MEEG;Compute;Diss;False;False;;diss_funcs;diss_funcs;meeg,tfr_freqs,inverse_method,target_labels,baseline,tfr_baseline_mode,n_jobs
-plot_label_power;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,tfr_freqs,target_labels,cluster_trial,show_plots
+plot_label_power;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,tfr_freqs,target_labels,label_colors,group_colors,cluster_trial,show_plots
 label_power_cond_permclust;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,label_pw_groups,tfr_freqs,target_labels,cluster_trial,n_jobs,show_plots
 connectivity_geodesic_statistics;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,cluster_trial,show_plots,save_plots,con_fmin,con_fmax
 export_ltcs;;Other;Preparation;Diss;False;False;;diss_funcs;diss_funcs;ltc_target_dir,cluster_trial,ct

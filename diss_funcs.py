@@ -1456,52 +1456,60 @@ def label_power(
             np.save(power_save_path, power)
 
 
-def plot_label_power(ct, tfr_freqs, target_labels, cluster_trial, show_plots, n_jobs):
+def plot_label_power(ct, tfr_freqs, target_labels, label_colors, group_colors, cluster_trial, show_plots):
     """Plot the label power and compute permutation-cluster statistics against 0."""
     tfr_dict = dict()
-    for group_name in ct.pr.sel_groups:
+    fig, axes = plt.subplots(len(target_labels), len(ct.pr.sel_groups), sharex=True, sharey=True, figsize=(13, 7))
+    for col_idx, group_name in enumerate(ct.pr.sel_groups):
         tfr_dict[group_name] = dict()
         group = Group(group_name, ct)
         times = MEEG(group.group_list[0], ct).load_evokeds()[0].times
         trial = cluster_trial[group_name]
-        for label_name in target_labels:
-            tfr_dict[group_name][label_name] = list()
+        for row_idx, label_name in enumerate(target_labels):
+            tfr_data = list()
             for meeg in group.load_items(obj_type="MEEG", data_type=None):
                 power_save_path = join(
                     meeg.save_dir,
                     f"{meeg.name}-{meeg.p_preset}-{trial}-{label_name}.npy",
                 )
                 power = np.load(power_save_path)
-                tfr_dict[group_name][label_name].append(power)
-    for label_name in target_labels:
-        nrows, ncols, ax_idxs = _get_n_subplots(len(ct.pr.sel_groups))
-        fig, ax = plt.subplots(nrows, ncols, figsize=figsize)
-        fig.suptitle(label_name)
-        for group_name, ax_idx in zip(ct.pr.sel_groups, ax_idxs):
-            tfr_data = tfr_dict[group_name][label_name]
+                tfr_data.append(power)
+
             tfr_averaged = np.mean(tfr_data, axis=0)
-            # Exclude edge-artefacts
-            vmax = np.std(np.abs(tfr_averaged)) * 2
-            vmin = -vmax
-            im = ax[ax_idx].imshow(
+            im = axes[row_idx, col_idx].imshow(
                 tfr_averaged,
                 cmap=colormaps["rainbow"],
                 extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
                 aspect="auto",
                 origin="lower",
-                vmin=vmin,
-                vmax=vmax,
+                vmin=-1,
+                vmax=1,
             )
+            plt.colorbar(im, ax=axes[row_idx, col_idx])
 
-            ax[ax_idx].set_title(group_name)
-            ax[ax_idx].set_xlabel("Time (ms)")
-            ax[ax_idx].set_ylabel("Frequency (Hz)")
-            ax[ax_idx].label_outer()
-            plt.colorbar(im, ax=ax[ax_idx])
-        plt.tight_layout()
-        Group(label_name, ct).plot_save(
-            f"label_power_{label_name}", matplotlib_figure=fig
-        )
+        pad = 5  # in points
+
+        for ax, col in zip(axes[0], ct.pr.sel_groups):
+            ax.annotate(col, xy=(0.5, 1), xytext=(0, pad),
+                        xycoords='axes fraction', textcoords='offset points',
+                        size='large', ha='center', va='baseline', color=group_colors[col])
+
+        for ax, row in zip(axes[:, 0], target_labels):
+            ax.annotate(row, xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
+                        xycoords=ax.yaxis.label, textcoords='offset points',
+                        size='large', ha='right', va='center', color=label_colors[row])
+
+        for ax in axes[-1, :]:
+            ax.set_xlabel("Time (s)")
+        for ax in axes[:, 0]:
+            ax.set_ylabel("Frequency (Hz)")
+
+    fig.tight_layout()
+    fig.subplots_adjust(left=0.15, top=0.95, wspace=0.1)
+
+    Group("all", ct).plot_save(
+        "label_power", matplotlib_figure=fig
+    )
     if show_plots:
         plt.show()
 
