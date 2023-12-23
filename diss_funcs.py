@@ -2,7 +2,7 @@ import itertools
 import re
 import sys
 from collections import OrderedDict
-from functools import reduce
+from functools import reduce, partial
 from itertools import combinations
 from os import mkdir
 from os.path import isdir, join
@@ -14,6 +14,7 @@ import scipy
 import seaborn as sns
 from matplotlib import pyplot as plt
 from matplotlib.pyplot import colormaps
+from matplotlib.ticker import FuncFormatter
 from mne.minimum_norm import source_induced_power
 from mne.stats import (
     permutation_cluster_test,
@@ -1100,6 +1101,50 @@ def plot_load_cell_group_ave(
         fig.show()
 
 
+def _convert_units(val, unit, long=False):
+    exp = np.floor(np.log10(val))
+    if exp > 0:
+        prefix = ""
+    elif exp > -3:
+        if long:
+            prefix = "milli"
+        else:
+            prefix =  "m"
+    elif exp > -6:
+        if long:
+            prefix = "micro"
+        else:
+            prefix = "μ"
+    elif exp > -9:
+        if long:
+            prefix = "nano"
+        else:
+            prefix = "n"
+    elif exp > -12:
+        if long:
+            prefix = "pico"
+        else:
+            prefix = "p"
+    elif exp > -15:
+        if long:
+            prefix = "femto"
+        else:
+            prefix = "f"
+    elif exp > -18:
+        if long:
+            prefix = "atto"
+        else:
+            prefix = "a"
+    else:
+        prefix = ""
+    factor = 10 ** (np.floor(np.abs(exp/3)) * 3)
+    unit = prefix + unit
+
+    return factor, unit
+
+def _tick_formatter(x, pos, factor):
+    return str(round(x * factor, 3))
+
 def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
     """The GFP of all groups is compared."""
     fs = [figsize[0], figsize[1] * len(ch_types)]
@@ -1113,6 +1158,7 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
     if not isinstance(axes, np.ndarray):
         axes = [axes]
     for ax_idx, ch_type in enumerate(ch_types):
+        min_val = 1
         for group_name in ct.pr.sel_groups:
             group = Group(group_name, ct)
             gfps = list()
@@ -1124,16 +1170,22 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
                 # Apply bandpass filter 1-30 Hz
                 gfp = mne.filter.filter_data(gfp, 1000, None, 30)
                 gfps.append(gfp)
+            y = np.mean(gfps, axis=0),
+            this_min = np.min(y)
+            min_val = np.min([min_val, this_min])
             axes[ax_idx].plot(
                 times,
-                np.mean(gfps, axis=0),
+                y[0],
                 label=group.name,
                 color=group_colors.get(group_name, "k"),
             )
+        unit = "V" if ch_type == "eeg" else "Am"
+        factor, unit = _convert_units(min_val, unit)
+        axes[ax_idx].yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
         axes[ax_idx].set_title(ch_type_names[ch_type])
-        axes[ax_idx].set_xlabel("Time (s)")
+        axes[ax_idx].set_xlabel("Time [s]")
         axes[ax_idx].set_ylabel(
-            "elektrische Spannung (V)" if ch_type == "eeg" else "Magnetfeldstärke (A/m)"
+            f"elektrische Spannung [{unit}]" if ch_type == "eeg" else f"Magnetfeldstärke [{unit}]"
         )
         axes[ax_idx].legend(loc="upper right", fontsize="small")
     plt.tight_layout()
@@ -1142,7 +1194,7 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
     Group("all", ct).plot_save("gfp_combined")
 
 
-def plot_ltc_group_stacked(ct, group_colors, target_labels, show_plots, save_plots):
+def plot_ltc_group_stacked(ct, group_colors, target_labels, label_colors, inverse_method, show_plots, save_plots):
     """The label-time-course of all groups is compared."""
     nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
     fs = [figsize[0], figsize[1] * nrows]
@@ -1154,6 +1206,7 @@ def plot_ltc_group_stacked(ct, group_colors, target_labels, show_plots, save_plo
         figsize=fs,
     )
     ax_idxs = list(ax_idxs)
+    min_val = 1
     for group_name in ct.pr.sel_groups:
         group = Group(group_name, ct)
         ltcs = group.load_ga_ltc()
@@ -1163,6 +1216,7 @@ def plot_ltc_group_stacked(ct, group_colors, target_labels, show_plots, save_plo
             ltc = ltcs[label_name]
             # Apply bandpass filter 1-30 Hz
             ltc_data = mne.filter.filter_data(ltc[0], 1000, None, 30)
+            min_val = np.min([min_val, np.min(ltc_data)])
             times = ltc[1]
             axes[ax_idx].plot(
                 times,
@@ -1170,10 +1224,13 @@ def plot_ltc_group_stacked(ct, group_colors, target_labels, show_plots, save_plo
                 label=group.name,
                 color=group_colors.get(group_name, "k"),
             )
-            axes[ax_idx].set_title(label_name)
+            axes[ax_idx].set_title(label_name, color=label_colors[label_name])
+    unit = "Am" if inverse_method == "MNE" else ""
+    factor, unit = _convert_units(min_val, unit)
     for ax in axes.flat:
+        ax.yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
         ax.set_xlabel("Time (s)")
-        ax.set_ylabel("MNE Wert (Am)")
+        ax.set_ylabel(f"Quellen Amplitude [{unit}]")
         ax.legend(loc="upper right", fontsize="small")
         ax.label_outer()
     plt.tight_layout()
@@ -1294,16 +1351,18 @@ def evoked_temporal_cluster(
     from mne_pipeline_hd.pipeline.loading import Group
     from mne_pipeline_hd.functions.operations import calculate_gfp
 
-    for group_names in compare_groups:
-        fs = [figsize[0], figsize[1] * len(ch_types)]
-        fig, axes = plt.subplots(
-            nrows=len(ch_types),
-            ncols=1,
-            sharex=True,
-            sharey=False,
-            figsize=fs,
-        )
-        for ax_idx, ch_type in enumerate(ch_types):
+    nrows = len(ch_types)
+    ncols = len(compare_groups)
+    fig, axes = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        sharex=True,
+        sharey=False,
+        figsize=(13, 5),
+    )
+
+    for col_idx, group_names in enumerate(compare_groups):
+        for row_idx, ch_type in enumerate(ch_types):
             group_data = list()
             for group_name in group_names:
                 group = Group(group_name, ct)
@@ -1456,7 +1515,7 @@ def label_power(
             np.save(power_save_path, power)
 
 
-def plot_label_power(ct, tfr_freqs, target_labels, label_colors, group_colors, cluster_trial, show_plots):
+def plot_label_power(ct, tfr_freqs, target_labels, label_alias, label_colors, group_colors, cluster_trial, show_plots):
     """Plot the label power and compute permutation-cluster statistics against 0."""
     tfr_dict = dict()
     fig, axes = plt.subplots(len(target_labels), len(ct.pr.sel_groups), sharex=True, sharey=True, figsize=(13, 7))
@@ -1487,22 +1546,22 @@ def plot_label_power(ct, tfr_freqs, target_labels, label_colors, group_colors, c
             )
             plt.colorbar(im, ax=axes[row_idx, col_idx])
 
-        pad = 5  # in points
+    pad = 5  # in points
 
-        for ax, col in zip(axes[0], ct.pr.sel_groups):
-            ax.annotate(col, xy=(0.5, 1), xytext=(0, pad),
-                        xycoords='axes fraction', textcoords='offset points',
-                        size='large', ha='center', va='baseline', color=group_colors[col])
+    for ax, col in zip(axes[0], ct.pr.sel_groups):
+        ax.annotate(col, xy=(0.5, 1), xytext=(0, pad),
+                    xycoords='axes fraction', textcoords='offset points',
+                    size='large', ha='center', va='baseline', color=group_colors[col])
 
-        for ax, row in zip(axes[:, 0], target_labels):
-            ax.annotate(row, xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
-                        xycoords=ax.yaxis.label, textcoords='offset points',
-                        size='large', ha='right', va='center', color=label_colors[row])
+    for ax, row in zip(axes[:, 0], target_labels):
+        ax.annotate(label_alias[row], xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
+                    xycoords=ax.yaxis.label, textcoords='offset points',
+                    size='large', ha='right', va='center', color=label_colors[row])
 
-        for ax in axes[-1, :]:
-            ax.set_xlabel("Time (s)")
-        for ax in axes[:, 0]:
-            ax.set_ylabel("Frequency (Hz)")
+    for ax in axes[-1, :]:
+        ax.set_xlabel("Time (s)")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("Frequency (Hz)")
 
     fig.tight_layout()
     fig.subplots_adjust(left=0.15, top=0.95, wspace=0.1)
@@ -1655,8 +1714,13 @@ def label_power_cond_permclust(
 
     if show_plots:
         fig.show()
-
-    data_df.style.to_latex(join(plot_group.figures_path, "label_power_stats.tex"))
+    latex_path = join(plot_group.figures_path, "label_power_stats.tex")
+    with open(latex_path, "w", encoding="utf-8",) as latex_file:
+        data_df.style.to_latex(
+            buf=latex_file,
+            caption="Signifikante Cluster der Label-Power-Permutationstests.",
+            label="tab:tfr_stats"
+        )
 
 
 def _connectivity_geodesic_dist(A, B):
@@ -1822,21 +1886,18 @@ def con_t_test(
             np.asarray(results_df), alpha=0.05
         )
         results_df.iloc[:, :] = pval_corrected
-        latex_table = results_df.to_latex(
-            formatters=[_significant_formatter for i in range(len(results_df.columns))],
-            caption=f"Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied zwischen {' und '.join(group_names)} in den Konnektivitäten aus {ct.pr.name}."
-                    f"Die Ergebnisse sind Bonferroni-korrigiert.",
-            label=f"tab:con_t_test_{'-'.join(group_names)}",
-        )
-        with open(
-                join(
+        latex_path = join(
                     ct.pr.save_dir_averages,
                     f"{ct.pr.name}_{' vs. '.join(group_names)}_con_t_statistics.tex",
                 ),
-                "w",
-                encoding="utf-8",
-        ) as f:
-            f.write(latex_table)
+        with open(latex_path, "w", encoding="utf-8",) as latex_file:
+            results_df.to_latex(
+                buf=latex_file,
+                formatters=[_significant_formatter for i in range(len(results_df.columns))],
+                caption=f"Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied zwischen {' und '.join(group_names)} in den Konnektivitäten aus {ct.pr.name}."
+                        f"Die Ergebnisse sind Bonferroni-korrigiert.",
+                label=f"tab:con_t_test_{'-'.join(group_names)}",
+            )
 
 
 def add_velo_meta(meeg):
