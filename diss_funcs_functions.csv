@@ -18,7 +18,7 @@ evoked_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch
 ltc_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,group_colors,target_labels,cluster_trial,n_jobs,show_plots
 label_power;;MEEG;Compute;Diss;False;False;;diss_funcs;diss_funcs;meeg,tfr_freqs,inverse_method,target_labels,baseline,tfr_baseline_mode,n_jobs
 plot_label_power;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,tfr_freqs,target_labels,label_colors,group_colors,cluster_trial,show_plots
-label_power_cond_permclust;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,label_pw_groups,tfr_freqs,target_labels,cluster_trial,n_jobs,show_plots
+label_power_cond_permclust;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,label_colors,label_alias,tfr_freqs,target_labels,cluster_trial,n_jobs,show_plots
 connectivity_geodesic_statistics;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,cluster_trial,show_plots,save_plots,con_fmin,con_fmax
 export_ltcs;;Other;Preparation;Diss;False;False;;diss_funcs;diss_funcs;ltc_target_dir,cluster_trial,ct
 con_t_test;;Other;Compute;Diss;False;False;;diss_funcs;diss_funcs;compare_groups,con_compare_labels,cluster_trial,ct

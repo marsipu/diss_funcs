@@ -1173,7 +1173,7 @@ def plot_ltc_group_stacked(ct, group_colors, target_labels, show_plots, save_plo
             axes[ax_idx].set_title(label_name)
     for ax in axes.flat:
         ax.set_xlabel("Time (s)")
-        ax.set_ylabel("MNE Wert (A)")
+        ax.set_ylabel("MNE Wert (Am)")
         ax.legend(loc="upper right", fontsize="small")
         ax.label_outer()
     plt.tight_layout()
@@ -1516,7 +1516,9 @@ def plot_label_power(ct, tfr_freqs, target_labels, label_colors, group_colors, c
 
 def label_power_cond_permclust(
         ct,
-        label_pw_groups,
+        compare_groups,
+        label_colors,
+        label_alias,
         tfr_freqs,
         target_labels,
         cluster_trial,
@@ -1525,19 +1527,19 @@ def label_power_cond_permclust(
 ):
     """The power inside the given labels is compared between groups with a 1sample-permutation-cluster-test with clustering in time and frequency."""
     """As in Compute power and phase lock in label of the source space."""
-    for group_names in label_pw_groups:
-        p_accept = 0.05
-        tail = 1
+    fig, axes = plt.subplots(
+        nrows=len(target_labels), ncols=len(compare_groups), sharex=True, sharey=True, figsize=(13, 7)
+    )
+    ims = list()
+    diff_avgs = list()
+    p_accept = 0.05
+    tail = 1
+    data_df = pd.DataFrame([], columns=["Vergleich", "Label", "Zeit", "Frequenz", "p-Wert"])
+    for col_idx, group_names in enumerate(compare_groups):
         if len(group_names) > 2:
             raise ValueError("Only two groups allowed for comparison")
-        nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
-        fs = [figsize[0], figsize[1] * nrows]
-        fig, ax = plt.subplots(
-            nrows=nrows, ncols=ncols, sharex=True, sharey=True, figsize=fs
-        )
-        ims = list()
-        diff_avgs = list()
-        for label, ax_idx in zip(target_labels, ax_idxs):
+        for row_idx, label in enumerate(target_labels):
+            label_name = label_alias[label]
             X = list()
             for group_name in group_names:
                 group = Group(group_name, ct)
@@ -1576,57 +1578,85 @@ def label_power_cond_permclust(
             good_clusted_inds = np.where(cluster_p_values < p_accept)[0]
             print(f"Found {len(good_clusted_inds)} significant clusters")
 
-            T_obs_plot = np.nan * np.ones_like(T_obs)
-            for c, p_val in zip(clusters, cluster_p_values):
-                if p_val <= p_accept:
-                    T_obs_plot[c] = T_obs[c]
+            if len(good_clusted_inds) > 0:
+                for c_idx in good_clusted_inds:
+                    c = clusters[c_idx]
+                    tmin = np.round(times[np.min(c[0])], 3)
+                    tmax = np.round(times[np.max(c[0])], 3)
+                    fmin = np.round(tfr_freqs[np.min(c[1])], 3)
+                    fmax = np.round(tfr_freqs[np.max(c[1])], 3)
+                    cpval = cluster_p_values[c_idx]
+                    data_df = pd.concat(
+                        [data_df,
+                         pd.DataFrame(
+                             {"Vergleich": "-".join(group_names),
+                              "Label": label_name,
+                              "Zeit": f"{tmin}-{tmax} s",
+                               "Frequenz": f"{fmin}-{fmax} Hz",
+                              "p-Wert": cpval}, index=[0])],
+                        ignore_index=True,
+                    )
 
             diff_avg = np.mean(X, axis=0)
-            time_idx = np.nonzero(np.round(times, 3) == 0.43)
-            tfr_idx = np.nonzero(np.round(tfr_freqs) == 50)
-            gpower_mean = diff_avg[time_idx, tfr_idx]
-            gpower_std = np.std(X, axis=0)[time_idx, tfr_idx]
-            print(f"Label {label}: mean={gpower_mean}, std={gpower_std}")
-
             diff_avgs.append(diff_avg)
-            im = ax[ax_idx].imshow(
+
+            diff_significant = np.nan * np.ones_like(diff_avg)
+            for c, p_val in zip(clusters, cluster_p_values):
+                if p_val <= p_accept:
+                    diff_significant[c] = diff_avg[c]
+
+            im = axes[row_idx, col_idx].imshow(
                 diff_avg.T,
-                cmap=colormaps["rainbow"],
-                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
-                aspect="auto",
-                origin="lower",
-            )
-            ims.append(im)
-            ax[ax_idx].imshow(
-                T_obs_plot.T,
                 cmap=colormaps["Greys"],
                 extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
                 aspect="auto",
                 origin="lower",
             )
-            fig.colorbar(im, ax=ax[ax_idx])
-            if ax_idx[0] == nrows - 1:
-                ax[ax_idx].set_xlabel("Time (ms)")
-            if ax_idx[1] == 0:
-                ax[ax_idx].set_ylabel("Frequency (Hz)")
-            ax[ax_idx].set_title(label)
-        # Set vmin and vmax according to all averages for min/max
-        vmin = np.min(np.concatenate(diff_avgs))
-        vmax = np.max(np.concatenate(diff_avgs))
-        for im in ims:
-            im.set(clim=(vmin, vmax))
+            ims.append(im)
+            im_sig = axes[row_idx, col_idx].imshow(
+                diff_significant.T,
+                cmap=colormaps["rainbow"],
+                extent=[times[0], times[-1], tfr_freqs[0], tfr_freqs[-1]],
+                aspect="auto",
+                origin="lower",
+            )
+            ims.append(im_sig)
+            fig.colorbar(im_sig, ax=axes[row_idx, col_idx])
 
-        plt_title = "Difference " + "-".join(group_names)
-        fig.suptitle(
-            f"{plt_title} ({len(good_clusted_inds)} cluster for p < {p_accept}, tail={tail})"
-        )
-        plt.tight_layout()
-        Group("all", ct).plot_save(
-            f"label_power_permclust_{plt_title}", matplotlib_figure=fig
-        )
+    pad = 5  # in points
 
-        if show_plots:
-            fig.show()
+    for ax, col in zip(axes[0], ['-'.join(gn) for gn in compare_groups]):
+        ax.annotate(col, xy=(0.5, 1), xytext=(0, pad),
+                    xycoords='axes fraction', textcoords='offset points',
+                    size='large', ha='center', va='baseline')
+
+    for ax, row in zip(axes[:, 0], target_labels):
+        ax.annotate(label_alias[row], xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
+                    xycoords=ax.yaxis.label, textcoords='offset points',
+                    size='large', ha='right', va='center', color=label_colors[row])
+
+    for ax in axes[-1, :]:
+        ax.set_xlabel("Time (s)")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("Frequency (Hz)")
+
+    # Set vmin and vmax according to all averages for min/max
+    vmin = np.min(np.concatenate(diff_avgs))
+    vmax = np.max(np.concatenate(diff_avgs))
+    for im in ims:
+        im.set(clim=(vmin, vmax))
+
+    fig.tight_layout()
+    fig.subplots_adjust(left=0.15, top=0.95, wspace=0.1)
+    plot_group = Group("all", ct)
+    plot_group.plot_save(
+        f"label_power_permclust", matplotlib_figure=fig
+    )
+
+    if show_plots:
+        fig.show()
+
+    data_df.style.to_latex(join(plot_group.figures_path, "label_power_stats.tex"))
 
 
 def _connectivity_geodesic_dist(A, B):
@@ -1856,11 +1886,13 @@ def plot_velo_evoked(group, show_plots):
     )
     group.plot_save("velo_comparision", matplotlib_figure=fig)
 
+
 def _get_group(meeg_name, groups):
     for group_name, group in groups.items():
         if meeg_name in group:
             return group_name
     return None
+
 
 def combine_meegs_rating(meeg, combine_groups):
     group_names = dict()
@@ -1878,7 +1910,7 @@ def combine_meegs_rating(meeg, combine_groups):
             return
         all_epochs = [meeg.load_epochs()]
         stims = [_get_group(meeg.name, group_names)]
-        for other_meeg in [m for m in meeg.pr.all_meeg if m!=meeg.name and _get_group(m, group_names) is not None]:
+        for other_meeg in [m for m in meeg.pr.all_meeg if m != meeg.name and _get_group(m, group_names) is not None]:
             match = re.match(sub_name + first_pattern, other_meeg)
             if match:
                 all_epochs.append(MEEG(other_meeg, meeg.ct).load_epochs())
@@ -1911,9 +1943,12 @@ def combine_meegs_rating(meeg, combine_groups):
         combined_epochs = mne.EpochsArray(new_data, epochs.info, new_events, tmin=epochs.tmin,
                                           event_id={"Stimulation": 1},
                                           baseline=epochs.baseline, metadata=new_metadata)
-        epochs_high = combined_epochs[combined_epochs.metadata.reset_index().sort_values(by="rating").index[len(combined_epochs)//2:]]
-        epochs_low = combined_epochs[combined_epochs.metadata.reset_index().sort_values(by="rating").index[:len(combined_epochs)//2]]
-        for name, epoch, group_name in zip([new_high_name, new_low_name], [epochs_high, epochs_low], ["Hohes Rating", "Niedriges Rating"]):
+        epochs_high = combined_epochs[
+            combined_epochs.metadata.reset_index().sort_values(by="rating").index[len(combined_epochs) // 2:]]
+        epochs_low = combined_epochs[
+            combined_epochs.metadata.reset_index().sort_values(by="rating").index[:len(combined_epochs) // 2]]
+        for name, epoch, group_name in zip([new_high_name, new_low_name], [epochs_high, epochs_low],
+                                           ["Hohes Rating", "Niedriges Rating"]):
             new_meeg = meeg.pr.add_meeg(name)
             meeg.pr.meeg_to_fsmri[name] = meeg.fsmri.name
             meeg.pr.sel_event_id[name] = meeg.sel_trials
