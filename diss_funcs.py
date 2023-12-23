@@ -1102,48 +1102,50 @@ def plot_load_cell_group_ave(
 
 
 def _convert_units(val, unit, long=False):
-    exp = np.floor(np.log10(val))
-    if exp > 0:
+    exp = np.fix(np.log10(np.abs(val)) / 3) * 3
+    if exp == 0:
         prefix = ""
-    elif exp > -3:
+    elif exp == -3:
         if long:
             prefix = "milli"
         else:
-            prefix =  "m"
-    elif exp > -6:
+            prefix = "m"
+    elif exp == -6:
         if long:
             prefix = "micro"
         else:
             prefix = "μ"
-    elif exp > -9:
+    elif exp == -9:
         if long:
             prefix = "nano"
         else:
             prefix = "n"
-    elif exp > -12:
+    elif exp == -12:
         if long:
             prefix = "pico"
         else:
             prefix = "p"
-    elif exp > -15:
+    elif exp == -15:
         if long:
             prefix = "femto"
         else:
             prefix = "f"
-    elif exp > -18:
+    elif exp == -18:
         if long:
             prefix = "atto"
         else:
             prefix = "a"
     else:
         prefix = ""
-    factor = 10 ** (np.floor(np.abs(exp/3)) * 3)
+    factor = 10 ** -exp
     unit = prefix + unit
 
     return factor, unit
 
+
 def _tick_formatter(x, pos, factor):
     return str(round(x * factor, 3))
+
 
 def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
     """The GFP of all groups is compared."""
@@ -1255,17 +1257,38 @@ def _get_threshold(p_value, n_observations, tail=0):
     return threshold
 
 
+def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel, pad=5):
+    for ax, (title, color) in zip(axes[0], xtitles.items()):
+        ax.annotate(title, xy=(0.5, 1), xytext=(0, pad),
+                    xycoords='axes fraction', textcoords='offset points',
+                    size='large', ha='center', va='baseline', color=color)
+
+    for ax, (title, color) in zip(axes[:, 0], ytitles.items()):
+        ax.annotate(title, xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
+                    xycoords=ax.yaxis.label, textcoords='offset points',
+                    size='large', ha='right', va='center', color=color,
+                    rotation=90)
+
+    for ax in axes[-1, :]:
+        ax.set_xlabel(xlabel)
+    for ax in axes[:, 0]:
+        ax.set_ylabel(ylabel)
+
+    fig.tight_layout()
+    fig.subplots_adjust(left=0.1, top=0.95, wspace=0.1)
+
 def _plot_permutation_cluster_test(
         group_data,
         times,
         group_names,
         one_sample=False,
-        show_plots=False,
         n_permutations=1000,
         tail=0,
         n_jobs=-1,
-        unit="A/m",
         ax=None,
+        factor=1,
+        xlabel="Zeit",
+        ylabel="elektrische Spannung",
         sfreq=1000,
         hpass=None,
         lpass=30,
@@ -1313,10 +1336,10 @@ def _plot_permutation_cluster_test(
             label=group_name,
         )
 
-    s_counter = 0
-    for i_c, c in enumerate(clusters):
+    cluster_data = list()
+    for c_idx, c in enumerate(clusters):
         c = c[0]
-        cpval = cluster_p_values[i_c]
+        cpval = cluster_p_values[c_idx]
 
         # Exclude clusters if before 0
         if times[c.start] < 0:
@@ -1329,19 +1352,22 @@ def _plot_permutation_cluster_test(
                 t_start,
                 t_stop,
                 color="r",
-                alpha=0.3,
-                label=f"{s_counter}: p_val={cpval:.3f}, {t_start:.3f}-{t_stop:.3f} s",
+                alpha=0.2,
             )
-            s_counter += 1
-        # else:
-        #     ax.axvspan(
-        #         times[c.start],
-        #         times[c.stop - 1],
-        #         color=(0.3, 0.3, 0.3),
-        #         alpha=0.3,
-        #     )
-    if show_plots:
-        plt.show()
+            cluster_dict = {
+                "start": round(t_start, 3),
+                "stop": round(t_stop, 3),
+                "p_val": round(cpval, 3),
+            }
+            cluster_data.append(cluster_dict)
+
+    ax.yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.label_outer()
+    ax.legend(loc="upper right", fontsize="small")
+
+    return cluster_data
 
 
 def evoked_temporal_cluster(
@@ -1357,10 +1383,13 @@ def evoked_temporal_cluster(
         nrows=nrows,
         ncols=ncols,
         sharex=True,
-        sharey=False,
-        figsize=(13, 5),
-    )
+        sharey="row",
+        figsize=(13, 3),
 
+    )
+    data_df = pd.DataFrame([], columns=["Vergleich", "Kanaltyp", "Zeit", "p-Wert"])
+    if nrows == 1:
+        axes = np.asarray([axes])
     for col_idx, group_names in enumerate(compare_groups):
         for row_idx, ch_type in enumerate(ch_types):
             group_data = list()
@@ -1385,41 +1414,56 @@ def evoked_temporal_cluster(
                     datas = _merge_measurements(datas)
                 group_data.append(np.asarray(list(datas.values())))
 
-            if isinstance(axes, np.ndarray):
-                ax = axes[ax_idx]
-            else:
-                ax = axes
-
-            unit = "V" if ch_type == "eeg" else "A/m"
-
-            _plot_permutation_cluster_test(
+            unit = "V" if ch_type == "eeg" else "Am"
+            factor, unit = _convert_units(np.min(group_data), unit)
+            cluster_data = _plot_permutation_cluster_test(
                 group_data,
                 times,
                 group_names,
                 one_sample=True,
-                show_plots=show_plots,
                 n_jobs=n_jobs,
                 group_colors=group_colors,
-                ax=ax,
-                unit=unit,
+                ax=axes[row_idx, col_idx],
+                factor=factor,
+                ylabel=f"elektrische Spannung [{unit}]" if ch_type == "eeg" else f"Magnetfeldstärke [{unit}]",
             )
-            ax.legend(loc="upper right", fontsize="small")
-            ax.set_xlabel("Time (s)")
-            ax.set_ylabel(
-                "elektrische Spannung (V)"
-                if ch_type == "eeg"
-                else "Magnetfeldstärke (A/m)"
-            )
-            ax.label_outer()
-        plt.tight_layout()
-        Group(f"{'-'.join(group_names)}", ct).plot_save("evoked_cluster_f_test")
+            for cld in cluster_data:
+                data_dict = {
+                    "Vergleich": " - ".join(group_names),
+                    "Kanaltyp": ch_type,
+                    "Zeit": f"{cld['start']}-{cld['stop']}",
+                    "p-Wert": cld["p_val"],
+                }
+                data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+    fig.tight_layout()
+    plot_group = Group("all", ct)
+    plot_group.plot_save("evoked_cluster_f_test", matplotlib_figure=fig)
+    if show_plots:
+        plt.show()
+    latex_path = join(plot_group.figures_path, "evoked_stats.tex")
+    with open(latex_path, "w", encoding="utf-8", ) as latex_file:
+        data_df.style.to_latex(
+            buf=latex_file,
+            caption="Signifikante Cluster der Cluster-Permutationstests der Evoked-Signale.",
+            label="tab:evoked_stats"
+        )
 
 
 def ltc_temporal_cluster(
-        ct, compare_groups, group_colors, target_labels, cluster_trial, n_jobs, show_plots
+        ct, compare_groups, group_colors, target_labels, label_alias, label_colors, cluster_trial, n_jobs, show_plots
 ):
     """A 1sample-permutation-cluster-test with clustering in time is performed between the label-time-courses of two stimulus-groups."""
-    for group_names in compare_groups:
+    nrows = len(target_labels)
+    ncols = len(compare_groups)
+    fig, axes = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        sharex=True,
+        sharey=True,
+        figsize=(ncols * 3.2, nrows * 2.4),
+    )
+    data_df = pd.DataFrame([], columns=["Vergleich", "Label", "Zeit", "p-Wert"])
+    for col_idx, group_names in enumerate(compare_groups):
         label_X = list()
         for group_name in group_names:
             group = Group(group_name, ct)
@@ -1438,41 +1482,50 @@ def ltc_temporal_cluster(
                     datas[label_name] = _merge_measurements(data)
             label_X.append(datas)
 
-        nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
-        fs = [figsize[0], figsize[1] * nrows]
-        fig, ax = plt.subplots(
-            nrows=nrows,
-            ncols=ncols,
-            sharex=True,
-            sharey=True,
-            figsize=fs,
-        )
-        for label_name, ax_idx in zip(target_labels, ax_idxs):
+        for row_idx, label_name in enumerate(target_labels):
             group_data = list()
             for data in label_X:
                 label_data = data[label_name]
                 group_data.append(np.asarray(list(label_data.values())))
 
-            _plot_permutation_cluster_test(
+            factor, unit = _convert_units(np.min(group_data), "")
+
+            cluster_data = _plot_permutation_cluster_test(
                 group_data,
                 times,
                 group_names,
                 one_sample=True,
-                ax=ax[ax_idx],
-                unit="A",
+                ax=axes[row_idx, col_idx],
                 n_jobs=n_jobs,
-                show_plots=show_plots,
                 group_colors=group_colors,
+                factor=factor,
+                ylabel=f"dSPM-Wert [{unit}]"
             )
-            ax[ax_idx].set_title(label_name)
-            ax[ax_idx].legend(loc="upper right", fontsize="small")
-            ax[ax_idx].set_xlabel("Time (s)")
-            ax[ax_idx].set_ylabel("MNE Wert (A)")
-            ax[ax_idx].label_outer()
+            for cld in cluster_data:
+                data_dict = {
+                    "Vergleich": " - ".join(group_names),
+                    "Label": label_name,
+                    "Zeit": f"{cld['start']}-{cld['stop']}",
+                    "p-Wert": cld["p_val"],
+                }
+                data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
 
-        group.plot_save(
-            "ltc_cluster_f_test",
-            trial=" vs ".join(group_names),
+    xtitles = {'-'.join(gn): "k" for gn in compare_groups}
+    ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
+    xlabel = "Time [s]"
+    ylabel = "Frequency [Hz]"
+    _2d_grid_titles_and_labels(axes, xtitles, ytitles, xlabel, ylabel)
+
+    plot_group = Group("all", ct)
+    plot_group.plot_save("ltc_cluster_f_test", matplotlib_figure=fig)
+    if show_plots:
+        plt.show()
+    latex_path = join(plot_group.figures_path, "ltc_stats.tex")
+    with open(latex_path, "w", encoding="utf-8", ) as latex_file:
+        data_df.style.to_latex(
+            buf=latex_file,
+            caption="Signifikante Cluster der Cluster-Permutationstests der Signale ausgewählter Quellen im Quellen-Raum.",
+            label="tab:ltc_stats"
         )
 
 
@@ -1546,25 +1599,11 @@ def plot_label_power(ct, tfr_freqs, target_labels, label_alias, label_colors, gr
             )
             plt.colorbar(im, ax=axes[row_idx, col_idx])
 
-    pad = 5  # in points
-
-    for ax, col in zip(axes[0], ct.pr.sel_groups):
-        ax.annotate(col, xy=(0.5, 1), xytext=(0, pad),
-                    xycoords='axes fraction', textcoords='offset points',
-                    size='large', ha='center', va='baseline', color=group_colors[col])
-
-    for ax, row in zip(axes[:, 0], target_labels):
-        ax.annotate(label_alias[row], xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
-                    xycoords=ax.yaxis.label, textcoords='offset points',
-                    size='large', ha='right', va='center', color=label_colors[row])
-
-    for ax in axes[-1, :]:
-        ax.set_xlabel("Time (s)")
-    for ax in axes[:, 0]:
-        ax.set_ylabel("Frequency (Hz)")
-
-    fig.tight_layout()
-    fig.subplots_adjust(left=0.15, top=0.95, wspace=0.1)
+    xtitles = {gp: group_colors[gp] for gp in ct.pr.sel_groups}
+    ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
+    xlabel = "Time [s]"
+    ylabel = "Frequency [Hz]"
+    _2d_grid_titles_and_labels(axes, xtitles, ytitles, xlabel, ylabel)
 
     Group("all", ct).plot_save(
         "label_power", matplotlib_figure=fig
@@ -1651,7 +1690,7 @@ def label_power_cond_permclust(
                              {"Vergleich": "-".join(group_names),
                               "Label": label_name,
                               "Zeit": f"{tmin}-{tmax} s",
-                               "Frequenz": f"{fmin}-{fmax} Hz",
+                              "Frequenz": f"{fmin}-{fmax} Hz",
                               "p-Wert": cpval}, index=[0])],
                         ignore_index=True,
                     )
@@ -1681,23 +1720,11 @@ def label_power_cond_permclust(
             )
             ims.append(im_sig)
             fig.colorbar(im_sig, ax=axes[row_idx, col_idx])
-
-    pad = 5  # in points
-
-    for ax, col in zip(axes[0], ['-'.join(gn) for gn in compare_groups]):
-        ax.annotate(col, xy=(0.5, 1), xytext=(0, pad),
-                    xycoords='axes fraction', textcoords='offset points',
-                    size='large', ha='center', va='baseline')
-
-    for ax, row in zip(axes[:, 0], target_labels):
-        ax.annotate(label_alias[row], xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
-                    xycoords=ax.yaxis.label, textcoords='offset points',
-                    size='large', ha='right', va='center', color=label_colors[row])
-
-    for ax in axes[-1, :]:
-        ax.set_xlabel("Time (s)")
-    for ax in axes[:, 0]:
-        ax.set_ylabel("Frequency (Hz)")
+    xtitles = {'-'.join(gn): "k" for gn in compare_groups}
+    ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
+    xlabel = "Time [s]"
+    ylabel = "Frequency [Hz]"
+    _2d_grid_titles_and_labels(axes, xtitles, ytitles, xlabel, ylabel)
 
     # Set vmin and vmax according to all averages for min/max
     vmin = np.min(np.concatenate(diff_avgs))
@@ -1705,8 +1732,6 @@ def label_power_cond_permclust(
     for im in ims:
         im.set(clim=(vmin, vmax))
 
-    fig.tight_layout()
-    fig.subplots_adjust(left=0.15, top=0.95, wspace=0.1)
     plot_group = Group("all", ct)
     plot_group.plot_save(
         f"label_power_permclust", matplotlib_figure=fig
@@ -1715,10 +1740,10 @@ def label_power_cond_permclust(
     if show_plots:
         fig.show()
     latex_path = join(plot_group.figures_path, "label_power_stats.tex")
-    with open(latex_path, "w", encoding="utf-8",) as latex_file:
+    with open(latex_path, "w", encoding="utf-8", ) as latex_file:
         data_df.style.to_latex(
             buf=latex_file,
-            caption="Signifikante Cluster der Label-Power-Permutationstests.",
+            caption="Signifikante Cluster der Label-Power-Cluster-Permutationstests.",
             label="tab:tfr_stats"
         )
 
@@ -1887,10 +1912,10 @@ def con_t_test(
         )
         results_df.iloc[:, :] = pval_corrected
         latex_path = join(
-                    ct.pr.save_dir_averages,
-                    f"{ct.pr.name}_{' vs. '.join(group_names)}_con_t_statistics.tex",
-                ),
-        with open(latex_path, "w", encoding="utf-8",) as latex_file:
+            ct.pr.save_dir_averages,
+            f"{ct.pr.name}_{' vs. '.join(group_names)}_con_t_statistics.tex",
+        ),
+        with open(latex_path, "w", encoding="utf-8", ) as latex_file:
             results_df.to_latex(
                 buf=latex_file,
                 formatters=[_significant_formatter for i in range(len(results_df.columns))],
