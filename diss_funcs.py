@@ -1257,7 +1257,8 @@ def _get_threshold(p_value, n_observations, tail=0):
     return threshold
 
 
-def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel=None, ylabel=None, pad=5):
+def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel=None, ylabel=None, left=0.1, top=0.95, wspace=0.1,
+                               pad=5):
     for ax, (title, color) in zip(axes[0], xtitles.items()):
         ax.annotate(title, xy=(0.5, 1), xytext=(0, pad),
                     xycoords='axes fraction', textcoords='offset points',
@@ -1277,7 +1278,8 @@ def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel=None, ylabel=
             ax.set_ylabel(ylabel)
 
     fig.tight_layout()
-    fig.subplots_adjust(left=0.1, top=0.95, wspace=0.1)
+    fig.subplots_adjust(left=left, top=top, wspace=wspace)
+
 
 def _plot_permutation_cluster_test(
         group_data,
@@ -1386,7 +1388,7 @@ def evoked_temporal_cluster(
         ncols=ncols,
         sharex=True,
         sharey="row",
-        figsize=(13, 3),
+        figsize=(12, 3 * nrows),
 
     )
     data_df = pd.DataFrame([], columns=["Vergleich", "Kanaltyp", "Zeit", "p-Wert"])
@@ -1437,9 +1439,9 @@ def evoked_temporal_cluster(
                     "p-Wert": cld["p_val"],
                 }
                 data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
-    xtitles = ["-".join(cg) for cg in compare_groups]
-    ytitles = ch_types
-    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles)
+    xtitles = {"-".join(cg): "k" for cg in compare_groups}
+    ytitles = {ct: "k" for ct in ch_types}
+    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, left=0.05, top=0.9)
     plot_group = Group("all", ct)
     plot_group.plot_save("evoked_cluster_f_test", matplotlib_figure=fig)
     if show_plots:
