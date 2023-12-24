@@ -26,3 +26,4 @@ add_velo_meta;;MEEG;Preparation;Diss;False;False;;diss_funcs;diss_funcs;meeg
 plot_velo_evoked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group,show_plots
 combine_meegs_rating;;MEEG;Ratings;Diss;False;False;;diss_funcs;diss_funcs;meeg,combine_groups
 plot_rating_share;;Other;Ratings;Diss;True;False;;diss_funcs;diss_funcs;ct
+plot_all_connectivity;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,show_plots

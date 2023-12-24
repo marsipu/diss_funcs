@@ -21,6 +21,8 @@ from mne.stats import (
     permutation_cluster_1samp_test,
     bonferroni_correction,
 )
+from mne.viz import circular_layout
+from mne_connectivity.viz import plot_connectivity_circle
 from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
 from mne_pipeline_hd.pipeline.loading import Group
 from mne_pipeline_hd.pipeline.loading import MEEG
@@ -2113,3 +2115,35 @@ def plot_rating_share(ct, combine_groups, show_plots):
         plt.show()
 
     group.plot_save("rating_share", matplotlib_figure=fig)
+
+
+def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
+    ncols = len(ct.pr.sel_groups)
+    fig, axes = plt.subplots(1, ncols, figsize=(ncols * 3, 3), facecolor="black", subplot_kw={'projection': 'polar'})
+    datas = dict()
+    for gidx, group_name in enumerate(ct.pr.sel_groups):
+        group = Group(group_name, ct)
+        con = group.load_ga_con()[cluster_trial[group_name]]["wpli"]
+        con_data = con.get_data("dense")[:, :, 0]
+        labels = con.names
+        datas[group_name] = con_data
+    values = np.asarray(list(datas.values()))
+    data_mean = np.mean(values, axis=0)
+
+    for idx, (group_name, con_data) in enumerate(datas.items()):
+        node_angles = circular_layout(
+            labels, labels, start_pos=90, group_boundaries=[0, len(labels) / 2]
+        )
+        plot_connectivity_circle(
+            con_data,
+            labels,
+            node_angles=node_angles,
+            node_colors=[label_colors[lb] for lb in labels],
+            ax=axes[idx],
+            title=group_name,
+            padding=0,
+        )
+    if show_plots:
+        fig.show()
+
+    Group("all", ct).plot_save("ga_connectivity", matplotlib_figure=fig)
