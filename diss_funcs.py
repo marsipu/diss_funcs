@@ -1185,7 +1185,7 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
         factor, unit = _convert_units(min_val, unit)
         axes[ax_idx].yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
         axes[ax_idx].set_title(ch_type_names[ch_type])
-        axes[ax_idx].set_xlabel("Time [s]")
+        axes[ax_idx].set_xlabel("Zeit [s]")
         axes[ax_idx].set_ylabel(
             f"elektrische Spannung [{unit}]" if ch_type == "eeg" else f"Magnetfeldstärke [{unit}]"
         )
@@ -1257,7 +1257,7 @@ def _get_threshold(p_value, n_observations, tail=0):
     return threshold
 
 
-def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel, pad=5):
+def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel=None, ylabel=None, pad=5):
     for ax, (title, color) in zip(axes[0], xtitles.items()):
         ax.annotate(title, xy=(0.5, 1), xytext=(0, pad),
                     xycoords='axes fraction', textcoords='offset points',
@@ -1269,10 +1269,12 @@ def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel, pad=
                     size='large', ha='right', va='center', color=color,
                     rotation=90)
 
-    for ax in axes[-1, :]:
-        ax.set_xlabel(xlabel)
-    for ax in axes[:, 0]:
-        ax.set_ylabel(ylabel)
+    if xlabel is not None:
+        for ax in axes[-1, :]:
+            ax.set_xlabel(xlabel)
+    if ylabel is not None:
+        for ax in axes[:, 0]:
+            ax.set_ylabel(ylabel)
 
     fig.tight_layout()
     fig.subplots_adjust(left=0.1, top=0.95, wspace=0.1)
@@ -1287,7 +1289,7 @@ def _plot_permutation_cluster_test(
         n_jobs=-1,
         ax=None,
         factor=1,
-        xlabel="Zeit",
+        xlabel="Zeit [s]",
         ylabel="elektrische Spannung",
         sfreq=1000,
         hpass=None,
@@ -1435,7 +1437,9 @@ def evoked_temporal_cluster(
                     "p-Wert": cld["p_val"],
                 }
                 data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
-    fig.tight_layout()
+    xtitles = ["-".join(cg) for cg in compare_groups]
+    ytitles = ch_types
+    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles)
     plot_group = Group("all", ct)
     plot_group.plot_save("evoked_cluster_f_test", matplotlib_figure=fig)
     if show_plots:
@@ -1514,7 +1518,7 @@ def ltc_temporal_cluster(
     ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
     xlabel = "Time [s]"
     ylabel = "Frequency [Hz]"
-    _2d_grid_titles_and_labels(axes, xtitles, ytitles, xlabel, ylabel)
+    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
 
     plot_group = Group("all", ct)
     plot_group.plot_save("ltc_cluster_f_test", matplotlib_figure=fig)
@@ -1603,7 +1607,7 @@ def plot_label_power(ct, tfr_freqs, target_labels, label_alias, label_colors, gr
     ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
     xlabel = "Time [s]"
     ylabel = "Frequency [Hz]"
-    _2d_grid_titles_and_labels(axes, xtitles, ytitles, xlabel, ylabel)
+    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
 
     Group("all", ct).plot_save(
         "label_power", matplotlib_figure=fig
@@ -1724,7 +1728,7 @@ def label_power_cond_permclust(
     ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
     xlabel = "Time [s]"
     ylabel = "Frequency [Hz]"
-    _2d_grid_titles_and_labels(axes, xtitles, ytitles, xlabel, ylabel)
+    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
 
     # Set vmin and vmax according to all averages for min/max
     vmin = np.min(np.concatenate(diff_avgs))
@@ -1789,12 +1793,13 @@ def connectivity_geodesic_statistics(
     freq_pairs = list(zip(con_fmin, con_fmax))
     x = "Vergleichsgruppen"
     y = "Geodätische Distanz"
-    fs = (figsize[0], figsize[1] * len(freq_pairs))
+    fs = (9, 4 * len(freq_pairs))
     fig, axes = plt.subplots(
         nrows=len(freq_pairs), sharex=True, sharey=True, figsize=fs
     )
     if not isinstance(axes, np.ndarray):
         axes = [axes]
+    results_df = pd.DataFrame([], columns=["Frequenzen", "Gruppen", "p-Wert"])
     for freq_idx, freq in enumerate(freq_pairs):
         df = pd.DataFrame([], columns=[x, y])
         for group_names in compare_groups:
@@ -1822,18 +1827,44 @@ def connectivity_geodesic_statistics(
                     df = pd.concat([df, pd.DataFrame({y: dist, x: group_key}, index=[0])], axis=0, ignore_index=True)
         pairs = [i for i in itertools.combinations(np.unique(df[x]), 2)]
         sns_ax = sns.boxplot(data=df, x=x, y=y, ax=axes[freq_idx])
-        axes[freq_idx].set_title(f"{freq[0]}-{freq[1]} Hz")
+        freq_str = f"{freq[0]}-{freq[1]} Hz"
+        axes[freq_idx].set_title(freq_str)
         axes[freq_idx].label_outer()
         annotator = Annotator(sns_ax, pairs, data=df, x=x, y=y)
         annotator.configure(test="t-test_paired", comparisons_correction="Bonferroni",
                             text_format="star", show_test_name=True, hide_non_significant=True)
-        annotator.apply_and_annotate()
+        result = annotator.apply_and_annotate()
+        pattern = r".*P_val:([\d\.e\-\+]*) t=.*"
+        for annot in result[1]:
+            data_dict = dict()
+            groups = " vs. ".join([str(struct["label"]) for struct in annot.structs])
+            a_str = annot.data.formatted_output
+            match = re.match(pattern, a_str)
+            if match is not None:
+                data_dict["Frequenzen"] = freq_str
+                data_dict["Gruppen"] = groups
+                data_dict["p-Wert"] = float(match.group(1))
+                results_df = pd.concat([results_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+            else:
+                print(a_str)
 
     plt.tight_layout()
     if show_plots:
         fig.show()
+
+    plot_group = Group("all", ct)
     if save_plots:
-        Group(ct.pr.name, ct).plot_save("connectivity_geodesic_distances")
+        plot_group.plot_save("connectivity_geodesic_distances")
+
+    latex_path = join(plot_group.figures_path, "con_stats.tex")
+    with open(latex_path, "w", encoding="utf-8", ) as latex_file:
+        results_df.to_latex(
+            buf=latex_file,
+            formatters=[_significant_formatter for i in range(len(results_df.columns))],
+            caption="Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied zwischen den Konnektivitsdifferenzen verschiedener Gruppen."
+                    "Die Ergebnisse sind Bonferroni-korrigiert.",
+            label=f"tab:con_stats",
+        )
 
 
 def export_ltcs(ltc_target_dir, cluster_trial, ct):
@@ -1855,6 +1886,8 @@ def export_ltcs(ltc_target_dir, cluster_trial, ct):
 
 
 def _significant_formatter(value):
+    if isinstance(value, str):
+        return value
     value_str = f"{value:.3f}"
     if value <= 0.05:
         value_str = "\\textbf{" + value_str + "}"
