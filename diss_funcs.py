@@ -903,7 +903,7 @@ def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
                     df = pd.concat([df, pd.DataFrame({y: rat, x: idx + 1, hue: group_name}, index=[0])], axis=0,
                                    ignore_index=True, )
 
-        sns.boxplot(data=df, x=x, y=y, hue=hue, palette=group_colors, ax=axes[ax_idx])
+        sns.boxplot(data=df, x=x, y=y, whis=(1, 99), hue=hue, palette=group_colors, ax=axes[ax_idx])
         axes[ax_idx].set_title(title)
         axes[ax_idx].label_outer()
 
@@ -1198,6 +1198,7 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
         plt.show()
     Group("all", ct).plot_save("gfp_combined")
 
+
 def _add_label_inset(ax, label_name, bounds):
     img_path = join(Path(__file__).parent, f"{label_name}.png")
     if isfile(img_path):
@@ -1207,6 +1208,7 @@ def _add_label_inset(ax, label_name, bounds):
         axin.axis("off")
     else:
         print(f"Image for {label_name} not found.")
+
 
 def plot_ltc_group_stacked(ct, group_colors, target_labels, label_colors, label_alias, show_plots, save_plots):
     """The label-time-course of all groups is compared."""
@@ -1270,17 +1272,18 @@ def _get_threshold(p_value, n_observations, tail=0):
 
 
 def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel=None, ylabel=None, left=0.1, top=0.95, wspace=0.1,
-                               pad=5):
+                               pad=5, tight=True):
     for ax, (title, color) in zip(axes[0], xtitles.items()):
         ax.annotate(title, xy=(0.5, 1), xytext=(0, pad),
                     xycoords='axes fraction', textcoords='offset points',
-                    size='large', ha='center', va='baseline', color=color)
+                    ha='center', va='baseline', color=color,
+                    fontsize=10)
 
     for ax, (title, color) in zip(axes[:, 0], ytitles.items()):
         ax.annotate(title, xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
                     xycoords=ax.yaxis.label, textcoords='offset points',
-                    size='large', ha='right', va='center', color=color,
-                    rotation=90)
+                    ha='right', va='center', color=color,
+                    rotation=90, fontsize=10)
 
     if xlabel is not None:
         for ax in axes[-1, :]:
@@ -1289,8 +1292,12 @@ def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel=None, ylabel=
         for ax in axes[:, 0]:
             ax.set_ylabel(ylabel)
 
-    fig.tight_layout()
+    if tight:
+        fig.tight_layout()
     fig.subplots_adjust(left=left, top=top, wspace=wspace)
+
+
+cluster_counter = 1
 
 
 def _plot_permutation_cluster_test(
@@ -1312,6 +1319,7 @@ def _plot_permutation_cluster_test(
         group_alphas={},
 ):
     # Compute permutation cluster test
+    global cluster_counter
     if one_sample:
         if len(group_data) > 2:
             raise ValueError(
@@ -1370,12 +1378,22 @@ def _plot_permutation_cluster_test(
                 color="r",
                 alpha=0.2,
             )
+            ax.text(
+                (t_start + t_stop) / 2,
+                0.05,
+                f"{cluster_counter}",
+                horizontalalignment="center",
+                verticalalignment="center",
+                fontsize="small",
+                transform=ax.get_xaxis_transform(),
+            )
             cluster_dict = {
                 "start": round(t_start, 3),
                 "stop": round(t_stop, 3),
                 "p_val": round(cpval, 3),
             }
             cluster_data.append(cluster_dict)
+            cluster_counter += 1
 
     ax.yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
     ax.set_xlabel(xlabel)
@@ -1384,6 +1402,32 @@ def _plot_permutation_cluster_test(
     ax.legend(loc="upper right", fontsize="small")
 
     return cluster_data
+
+
+def _significant_formatter(value):
+    if isinstance(value, str):
+        return value
+    value_str = f"{value:.3f}"
+    if value <= 0.05:
+        value_str = f"({value_str})*"
+    elif value <= 0.01:
+        value_str = f"({value_str})**"
+    elif value <= 0.001:
+        value_str = f"({value_str})***"
+    return value_str
+
+
+def _save_latex_table(data_df, latex_path, caption, label):
+    with open(latex_path, "w", encoding="utf-8", ) as latex_file:
+        data_df.index = np.arange(len(data_df)) + 1
+        data_df.to_latex(
+            buf=latex_file,
+            formatters=[_significant_formatter for i in range(len(data_df.columns))],
+            caption=caption,
+            label=label,
+            column_format="|".join(["c" for i in range(len(data_df.columns) + 1)]),
+            index_names=True
+        )
 
 
 def evoked_temporal_cluster(
@@ -1400,12 +1444,14 @@ def evoked_temporal_cluster(
         ncols=ncols,
         sharex=True,
         sharey="row",
-        figsize=(12, 3 * nrows),
+        figsize=(2.5 * ncols, 2.5 * nrows),
 
     )
     data_df = pd.DataFrame([], columns=["Vergleich", "Kanaltyp", "Zeit", "p-Wert"])
     if nrows == 1:
         axes = np.asarray([axes])
+    global cluster_counter
+    cluster_counter = 1
     for col_idx, group_names in enumerate(compare_groups):
         for row_idx, ch_type in enumerate(ch_types):
             group_data = list()
@@ -1432,6 +1478,7 @@ def evoked_temporal_cluster(
 
             unit = "V" if ch_type == "eeg" else "Am"
             factor, unit = _convert_units(np.min(group_data), unit)
+
             cluster_data = _plot_permutation_cluster_test(
                 group_data,
                 times,
@@ -1459,12 +1506,9 @@ def evoked_temporal_cluster(
     if show_plots:
         plt.show()
     latex_path = join(plot_group.figures_path, "evoked_stats.tex")
-    with open(latex_path, "w", encoding="utf-8", ) as latex_file:
-        data_df.style.to_latex(
-            buf=latex_file,
-            caption="Signifikante Cluster der Cluster-Permutationstests der Evoked-Signale.",
-            label="tab:evoked_stats"
-        )
+    _save_latex_table(data_df, latex_path,
+                      caption="Signifikante Cluster der Cluster-Permutationstests der Evoked-Signale.",
+                      label="tab:evoked_stats")
 
 
 def ltc_temporal_cluster(
@@ -1478,7 +1522,7 @@ def ltc_temporal_cluster(
         ncols=ncols,
         sharex=True,
         sharey=True,
-        figsize=(ncols * 4, nrows * 2.4),
+        figsize=(ncols * 3.2, nrows * 2),
     )
     data_df = pd.DataFrame([], columns=["Vergleich", "Label", "Zeit", "p-Wert"])
     for col_idx, group_names in enumerate(compare_groups):
@@ -1519,7 +1563,7 @@ def ltc_temporal_cluster(
                 factor=factor,
                 ylabel=f"dSPM-Wert [{unit}]"
             )
-            _add_label_inset(axes[row_idx, col_idx], label_name, [0, 0.65, 0.25, 0.25])
+            _add_label_inset(axes[row_idx, col_idx], label_name, [0, 0.65, 0.3, 0.3])
             for cld in cluster_data:
                 data_dict = {
                     "Vergleich": " - ".join(group_names),
@@ -1540,12 +1584,10 @@ def ltc_temporal_cluster(
     if show_plots:
         plt.show()
     latex_path = join(plot_group.figures_path, "ltc_stats.tex")
-    with open(latex_path, "w", encoding="utf-8", ) as latex_file:
-        data_df.style.to_latex(
-            buf=latex_file,
-            caption="Signifikante Cluster der Cluster-Permutationstests der Signale ausgewählter Quellen im Quellen-Raum.",
-            label="tab:ltc_stats"
-        )
+    _save_latex_table(
+        data_df, latex_path,
+        caption="Signifikante Cluster der Cluster-Permutationstests der Signale ausgewählter Quellen im Quellen-Raum.",
+        label="tab:ltc_stats")
 
 
 def label_power(
@@ -1590,7 +1632,10 @@ def label_power(
 def plot_label_power(ct, tfr_freqs, target_labels, label_alias, label_colors, group_colors, cluster_trial, show_plots):
     """Plot the label power and compute permutation-cluster statistics against 0."""
     tfr_dict = dict()
-    fig, axes = plt.subplots(len(target_labels), len(ct.pr.sel_groups), sharex=True, sharey=True, figsize=(13, 7))
+    nrows = len(target_labels)
+    ncols = len(ct.pr.sel_groups)
+    fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True, figsize=(ncols*2, nrows*2), layout="constrained")
+    im = None
     for col_idx, group_name in enumerate(ct.pr.sel_groups):
         tfr_dict[group_name] = dict()
         group = Group(group_name, ct)
@@ -1616,13 +1661,14 @@ def plot_label_power(ct, tfr_freqs, target_labels, label_alias, label_colors, gr
                 vmin=-1,
                 vmax=1,
             )
-            plt.colorbar(im, ax=axes[row_idx, col_idx])
+    for ax in axes[:, -1]:
+        fig.colorbar(im, ax=ax)
 
     xtitles = {gp: group_colors[gp] for gp in ct.pr.sel_groups}
     ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
     xlabel = "Time [s]"
     ylabel = "Frequency [Hz]"
-    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
+    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel, tight=False)
 
     Group("all", ct).plot_save(
         "label_power", matplotlib_figure=fig
@@ -1644,8 +1690,10 @@ def label_power_cond_permclust(
 ):
     """The power inside the given labels is compared between groups with a 1sample-permutation-cluster-test with clustering in time and frequency."""
     """As in Compute power and phase lock in label of the source space."""
+    nrows = len(target_labels)
+    ncols = len(compare_groups)
     fig, axes = plt.subplots(
-        nrows=len(target_labels), ncols=len(compare_groups), sharex=True, sharey=True, figsize=(13, 7)
+        nrows=nrows, ncols=ncols, sharex=True, sharey=True, figsize=(2*ncols, 2*nrows), layout="constrained"
     )
     ims = list()
     diff_avgs = list()
@@ -1738,12 +1786,13 @@ def label_power_cond_permclust(
                 origin="lower",
             )
             ims.append(im_sig)
-            fig.colorbar(im_sig, ax=axes[row_idx, col_idx])
+    for ax in axes[:, -1]:
+        fig.colorbar(im, ax=ax)
     xtitles = {'-'.join(gn): "k" for gn in compare_groups}
     ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
     xlabel = "Time [s]"
     ylabel = "Frequency [Hz]"
-    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
+    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel, tight=False)
 
     # Set vmin and vmax according to all averages for min/max
     vmin = np.min(np.concatenate(diff_avgs))
@@ -1759,12 +1808,9 @@ def label_power_cond_permclust(
     if show_plots:
         fig.show()
     latex_path = join(plot_group.figures_path, "label_power_stats.tex")
-    with open(latex_path, "w", encoding="utf-8", ) as latex_file:
-        data_df.style.to_latex(
-            buf=latex_file,
-            caption="Signifikante Cluster der Label-Power-Cluster-Permutationstests.",
-            label="tab:tfr_stats"
-        )
+    _save_latex_table(data_df, latex_path,
+                      caption="Signifikante Cluster der Cluster-Permutationstests der Label-Power.",
+                      label="tab:label_power_stats")
 
 
 def _connectivity_geodesic_dist(A, B):
@@ -1814,7 +1860,7 @@ def connectivity_geodesic_statistics(
     )
     if not isinstance(axes, np.ndarray):
         axes = [axes]
-    results_df = pd.DataFrame([], columns=["Frequenzen", "Gruppen", "p-Wert"])
+    data_df = pd.DataFrame([], columns=["Frequenzen", "Gruppen", "p-Wert"])
     for freq_idx, freq in enumerate(freq_pairs):
         df = pd.DataFrame([], columns=[x, y])
         for group_names in compare_groups:
@@ -1859,7 +1905,7 @@ def connectivity_geodesic_statistics(
                 data_dict["Frequenzen"] = freq_str
                 data_dict["Gruppen"] = groups
                 data_dict["p-Wert"] = float(match.group(1))
-                results_df = pd.concat([results_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+                data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
             else:
                 print(a_str)
 
@@ -1872,14 +1918,12 @@ def connectivity_geodesic_statistics(
         plot_group.plot_save("connectivity_geodesic_distances")
 
     latex_path = join(plot_group.figures_path, "con_stats.tex")
-    with open(latex_path, "w", encoding="utf-8", ) as latex_file:
-        results_df.to_latex(
-            buf=latex_file,
-            formatters=[_significant_formatter for i in range(len(results_df.columns))],
-            caption="Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied zwischen den Konnektivitsdifferenzen verschiedener Gruppen."
-                    "Die Ergebnisse sind Bonferroni-korrigiert.",
-            label=f"tab:con_stats",
-        )
+    _save_latex_table(
+        data_df, latex_path,
+        caption="Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied "
+                "zwischen den Konnektivitsdifferenzen verschiedener Gruppen. "
+                "Die Ergebnisse sind Bonferroni-korrigiert.",
+        label="tab:con_stats")
 
 
 def export_ltcs(ltc_target_dir, cluster_trial, ct):
@@ -1900,15 +1944,6 @@ def export_ltcs(ltc_target_dir, cluster_trial, ct):
                 print(f"{meeg.name}: Saved {ltc_save_path}")
 
 
-def _significant_formatter(value):
-    if isinstance(value, str):
-        return value
-    value_str = f"{value:.3f}"
-    if value <= 0.05:
-        value_str = "\\textbf{" + value_str + "}"
-    return value_str
-
-
 def con_t_test(
         compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_trial, ct
 ):
@@ -1917,7 +1952,7 @@ def con_t_test(
     if not isinstance(con_fmax, list):
         con_fmax = [con_fmax]
     for group_names in compare_groups:
-        results_df = pd.DataFrame(
+        data_df = pd.DataFrame(
             index=[f"{lb1} -> {lb2}" for lb1, lb2 in con_compare_labels],
             columns=[f"{fmin}-{fmax}" for fmin, fmax in zip(con_fmin, con_fmax)],
         )
@@ -1951,26 +1986,22 @@ def con_t_test(
                     X.append(list(merged.values()))
                 X = np.asarray(X)
                 result = ttest_1samp(X[0] - X[1], 0, alternative="greater")
-                results_df.iloc[lb_idx, fidx] = result.pvalue
+                data_df.iloc[lb_idx, fidx] = result.pvalue
                 result_str = f"{' vs. '.join(group_names)}, {label_key}, {fmin}-{fmax} Hz: t={result.statistic}, p={result.pvalue}, conf_int={result.confidence_interval()}\n"
                 print(result_str)
         # Apply Bonferroni-Correction
         reject, pval_corrected = bonferroni_correction(
-            np.asarray(results_df), alpha=0.05
+            np.asarray(data_df), alpha=0.05
         )
-        results_df.iloc[:, :] = pval_corrected
+        data_df.iloc[:, :] = pval_corrected
         latex_path = join(
             ct.pr.save_dir_averages,
             f"{ct.pr.name}_{' vs. '.join(group_names)}_con_t_statistics.tex",
         ),
-        with open(latex_path, "w", encoding="utf-8", ) as latex_file:
-            results_df.to_latex(
-                buf=latex_file,
-                formatters=[_significant_formatter for i in range(len(results_df.columns))],
-                caption=f"Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied zwischen {' und '.join(group_names)} in den Konnektivitäten aus {ct.pr.name}."
-                        f"Die Ergebnisse sind Bonferroni-korrigiert.",
-                label=f"tab:con_t_test_{'-'.join(group_names)}",
-            )
+        _save_latex_table(data_df, latex_path,
+                          caption=f"Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied zwischen {' und '.join(group_names)} in den Konnektivitäten aus {ct.pr.name}."
+                                  f"Die Ergebnisse sind Bonferroni-korrigiert.",
+                          label=f"tab:con_t_test_{'-'.join(group_names)}")
 
 
 def add_velo_meta(meeg):
@@ -2096,7 +2127,7 @@ def combine_meegs_rating(meeg, combine_groups):
     meeg.pr.save()
 
 
-def plot_rating_share(ct, combine_groups, show_plots):
+def plot_rating_share(ct, combine_groups, group_colors, show_plots):
     fs = [figsize[0], figsize[1] * 2]
     fig, ax = plt.subplots(2, 1, figsize=fs)
     for ax_idx, rat_group in enumerate(["Hohes Rating", "Niedriges Rating"]):
@@ -2111,7 +2142,8 @@ def plot_rating_share(ct, combine_groups, show_plots):
                 else:
                     vals[k].append(0)
         for k, v in vals.items():
-            p = ax[ax_idx].bar([str(i) for i in range(1, len(group.group_list) + 1)], v, bottom=bottom, label=k)
+            p = ax[ax_idx].bar([str(i) for i in range(1, len(group.group_list) + 1)], v, bottom=bottom, label=k,
+                               color=group_colors[k])
             bottom += v
 
             ax[ax_idx].bar_label(p, label_type="center")
@@ -2124,8 +2156,8 @@ def plot_rating_share(ct, combine_groups, show_plots):
 
     if show_plots:
         plt.show()
-
-    group.plot_save("rating_share", matplotlib_figure=fig)
+    plot_group = Group("all", ct)
+    plot_group.plot_save("rating_share", matplotlib_figure=fig)
 
 
 def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
@@ -2134,7 +2166,8 @@ def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
         "Insula-post-lh": "Ins. post.",
     }
     ncols = len(ct.pr.sel_groups) // 2
-    fig, axes = plt.subplots(2, ncols, figsize=(ncols * 3, 2 * 3), facecolor="black", subplot_kw={'projection': 'polar'})
+    fig, axes = plt.subplots(2, ncols, figsize=(ncols * 3, 2 * 3), facecolor="black",
+                             subplot_kw={'projection': 'polar'})
     axes = axes.flatten()
     datas = dict()
     rating_datas = dict()
@@ -2181,8 +2214,7 @@ def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
             vmax=vmax
         )
     fig.tight_layout()
-    if show_plots:
-        fig.show()
+    fig.show()
 
     Group("all", ct).plot_save("ga_connectivity", matplotlib_figure=fig)
 
@@ -2211,3 +2243,28 @@ def create_source_insets(ct, target_labels, label_colors):
             brain.add_label(label, borders=False, color=color)
             fsmri.plot_save("labels", brain=brain)
             brain.save_image(join(Path(__file__).parent, f"{label.name}.png"))
+
+
+def plot_author_alignment(ct):
+    if ct.pr.name == "Experiment1":
+        meeg = MEEG("pp7a_128_a", ct)
+        info = meeg.load_info()
+        trans = meeg.load_transformation()
+        forward = meeg.load_forward()
+        src = meeg.fsmri.load_source_space()
+        bem = meeg.fsmri.load_bem_solution()
+
+        with mne.viz.use_3d_backend("pyvista"):
+            fig = mne.viz.plot_alignment(
+                info,
+                trans,
+                meeg.fsmri.name,
+                meeg.subjects_dir,
+                surfaces=["head-dense", "brain"],
+                meg=["helmet", "sensors"],
+                fwd=forward,
+                show_axes=True,
+                dig=True,
+                src=src,
+                bem=bem,
+            )

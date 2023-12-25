@@ -14,6 +14,7 @@ plot_ltc_group_stacked;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,gro
 plot_ratings_evoked_comparision;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,group_colors,show_plots,n_jobs
 plot_load_cell_group_ave;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,trig_plt_time,baseline_limit,show_plots,apply_savgol,trig_channel
 plot_ratings_combined;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,rating_groups,show_plots
+plot_rating_share;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;,combine_groups,group_colors,show_plots
 evoked_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,group_colors,compare_groups,cluster_trial,n_jobs,show_plots
 ltc_temporal_cluster;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,compare_groups,group_colors,target_labels,label_alias,label_colors,cluster_trial,n_jobs,show_plots
 label_power;;MEEG;Compute;Diss;False;False;;diss_funcs;diss_funcs;meeg,tfr_freqs,inverse_method,target_labels,baseline,tfr_baseline_mode,n_jobs
@@ -25,6 +26,6 @@ con_t_test;;Other;Compute;Diss;False;False;;diss_funcs;diss_funcs;compare_groups
 add_velo_meta;;MEEG;Preparation;Diss;False;False;;diss_funcs;diss_funcs;meeg
 plot_velo_evoked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group,show_plots
 combine_meegs_rating;;MEEG;Ratings;Diss;False;False;;diss_funcs;diss_funcs;meeg,combine_groups
-plot_rating_share;;Other;Ratings;Diss;True;False;;diss_funcs;diss_funcs;ct
-plot_all_connectivity;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,show_plots
+plot_all_connectivity;;Other;Plot;Diss;False;True;;diss_funcs;diss_funcs;ct,show_plots
 create_source_insets;;Other;Preparation;Diss;False;True;;diss_funcs;diss_funcs;ct,target_labels,label_colors
+plot_author_alignment;;Other;Preparation;Diss;False;True;;diss_funcs;diss_funcs;ct
