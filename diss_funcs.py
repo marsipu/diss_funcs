@@ -1505,10 +1505,11 @@ def evoked_temporal_cluster(
     plot_group.plot_save("evoked_cluster_f_test", matplotlib_figure=fig)
     if show_plots:
         plt.show()
-    latex_path = join(plot_group.figures_path, "evoked_stats.tex")
+    exp = "exp1" if "1" in ct.pr.name else "exp2"
+    latex_path = join(plot_group.figures_path, f"{exp}_evoked_stats.tex")
     _save_latex_table(data_df, latex_path,
-                      caption="Signifikante Cluster der Cluster-Permutationstests der Evoked-Signale.",
-                      label="tab:evoked_stats")
+                      caption="Signifikante Cluster der Cluster-Permutationstests.",
+                      label=f"tab:{exp}_evoked_stats")
 
 
 def ltc_temporal_cluster(
@@ -1583,11 +1584,12 @@ def ltc_temporal_cluster(
     plot_group.plot_save("ltc_cluster_f_test", matplotlib_figure=fig)
     if show_plots:
         plt.show()
-    latex_path = join(plot_group.figures_path, "ltc_stats.tex")
+    exp = "exp1" if "1" in ct.pr.name else "exp2"
+    latex_path = join(plot_group.figures_path, f"{exp}_ltc_stats.tex")
     _save_latex_table(
         data_df, latex_path,
         caption="Signifikante Cluster der Cluster-Permutationstests der Signale ausgewählter Quellen im Quellen-Raum.",
-        label="tab:ltc_stats")
+        label=f"tab:{exp}_ltc_stats")
 
 
 def label_power(
@@ -1807,10 +1809,11 @@ def label_power_cond_permclust(
 
     if show_plots:
         fig.show()
-    latex_path = join(plot_group.figures_path, "label_power_stats.tex")
+    exp = "exp1" if "1" in ct.pr.name else "exp2"
+    latex_path = join(plot_group.figures_path, f"{exp}_label_power_stats.tex")
     _save_latex_table(data_df, latex_path,
                       caption="Signifikante Cluster der Cluster-Permutationstests der Label-Power.",
-                      label="tab:label_power_stats")
+                      label=f"tab:{exp}_label_power_stats")
 
 
 def _connectivity_geodesic_dist(A, B):
@@ -1916,14 +1919,14 @@ def connectivity_geodesic_statistics(
     plot_group = Group("all", ct)
     if save_plots:
         plot_group.plot_save("connectivity_geodesic_distances")
-
-    latex_path = join(plot_group.figures_path, "con_stats.tex")
+    exp = "exp1" if "1" in ct.pr.name else "exp2"
+    latex_path = join(plot_group.figures_path, f"{exp}_con_stats.tex")
     _save_latex_table(
         data_df, latex_path,
         caption="Ergebnisse des T-Tests für abhängige Stichproben für den Unterschied "
                 "zwischen den Konnektivitsdifferenzen verschiedener Gruppen. "
                 "Die Ergebnisse sind Bonferroni-korrigiert.",
-        label="tab:con_stats")
+        label=f"tab:{exp}_con_stats")
 
 
 def export_ltcs(ltc_target_dir, cluster_trial, ct):
