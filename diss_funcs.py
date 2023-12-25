@@ -5,7 +5,8 @@ from collections import OrderedDict
 from functools import reduce, partial
 from itertools import combinations
 from os import mkdir
-from os.path import isdir, join
+from os.path import isdir, join, isfile
+from pathlib import Path
 
 import mne
 import numpy as np
@@ -24,7 +25,7 @@ from mne.stats import (
 from mne.viz import circular_layout
 from mne_connectivity.viz import plot_connectivity_circle
 from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
-from mne_pipeline_hd.pipeline.loading import Group
+from mne_pipeline_hd.pipeline.loading import Group, FSMRI
 from mne_pipeline_hd.pipeline.loading import MEEG
 from scipy.signal import find_peaks, savgol_filter
 from scipy.stats import ttest_1samp
@@ -1197,8 +1198,17 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
         plt.show()
     Group("all", ct).plot_save("gfp_combined")
 
+def _add_label_inset(ax, label_name, bounds):
+    img_path = join(Path(__file__).parent, f"{label_name}.png")
+    if isfile(img_path):
+        image = plt.imread(img_path)
+        axin = ax.inset_axes(bounds)
+        axin.imshow(image)
+        axin.axis("off")
+    else:
+        print(f"Image for {label_name} not found.")
 
-def plot_ltc_group_stacked(ct, group_colors, target_labels, label_colors, inverse_method, show_plots, save_plots):
+def plot_ltc_group_stacked(ct, group_colors, target_labels, label_colors, label_alias, show_plots, save_plots):
     """The label-time-course of all groups is compared."""
     nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
     fs = [figsize[0], figsize[1] * nrows]
@@ -1228,13 +1238,13 @@ def plot_ltc_group_stacked(ct, group_colors, target_labels, label_colors, invers
                 label=group.name,
                 color=group_colors.get(group_name, "k"),
             )
-            axes[ax_idx].set_title(label_name, color=label_colors[label_name])
-    unit = "Am" if inverse_method == "MNE" else ""
-    factor, unit = _convert_units(min_val, unit)
+            _add_label_inset(axes[ax_idx], label_name, [0, 0.65, 0.3, 0.3])
+            axes[ax_idx].set_title(label_alias[label_name], color=label_colors[label_name])
+    factor, unit = _convert_units(min_val, "")
     for ax in axes.flat:
         ax.yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel(f"Quellen Amplitude [{unit}]")
+        ax.set_xlabel("Zeit (s)")
+        ax.set_ylabel(f"Quellen Amplitude")
         ax.legend(loc="upper right", fontsize="small")
         ax.label_outer()
     plt.tight_layout()
@@ -1443,7 +1453,7 @@ def evoked_temporal_cluster(
                 data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
     xtitles = {"-".join(cg): "k" for cg in compare_groups}
     ytitles = {ct: "k" for ct in ch_types}
-    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, left=0.05, top=0.9)
+    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, left=0.1, top=0.9)
     plot_group = Group("all", ct)
     plot_group.plot_save("evoked_cluster_f_test", matplotlib_figure=fig)
     if show_plots:
@@ -1468,7 +1478,7 @@ def ltc_temporal_cluster(
         ncols=ncols,
         sharex=True,
         sharey=True,
-        figsize=(ncols * 3.2, nrows * 2.4),
+        figsize=(ncols * 4, nrows * 2.4),
     )
     data_df = pd.DataFrame([], columns=["Vergleich", "Label", "Zeit", "p-Wert"])
     for col_idx, group_names in enumerate(compare_groups):
@@ -1509,6 +1519,7 @@ def ltc_temporal_cluster(
                 factor=factor,
                 ylabel=f"dSPM-Wert [{unit}]"
             )
+            _add_label_inset(axes[row_idx, col_idx], label_name, [0, 0.65, 0.25, 0.25])
             for cld in cluster_data:
                 data_dict = {
                     "Vergleich": " - ".join(group_names),
@@ -1521,7 +1532,7 @@ def ltc_temporal_cluster(
     xtitles = {'-'.join(gn): "k" for gn in compare_groups}
     ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
     xlabel = "Time [s]"
-    ylabel = "Frequency [Hz]"
+    ylabel = "Quellen Amplitude"
     _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
 
     plot_group = Group("all", ct)
@@ -1831,7 +1842,7 @@ def connectivity_geodesic_statistics(
                     df = pd.concat([df, pd.DataFrame({y: dist, x: group_key}, index=[0])], axis=0, ignore_index=True)
         pairs = [i for i in itertools.combinations(np.unique(df[x]), 2)]
         sns_ax = sns.boxplot(data=df, x=x, y=y, ax=axes[freq_idx])
-        freq_str = f"{freq[0]}-{freq[1]} Hz"
+        freq_str = f"{int(freq[0])}-{int(freq[1])} Hz"
         axes[freq_idx].set_title(freq_str)
         axes[freq_idx].label_outer()
         annotator = Annotator(sns_ax, pairs, data=df, x=x, y=y)
@@ -2118,32 +2129,85 @@ def plot_rating_share(ct, combine_groups, show_plots):
 
 
 def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
-    ncols = len(ct.pr.sel_groups)
-    fig, axes = plt.subplots(1, ncols, figsize=(ncols * 3, 3), facecolor="black", subplot_kw={'projection': 'polar'})
+    label_alias = {
+        "Insula-ant-lh": "Ins. ant.",
+        "Insula-post-lh": "Ins. post.",
+    }
+    ncols = len(ct.pr.sel_groups) // 2
+    fig, axes = plt.subplots(2, ncols, figsize=(ncols * 3, 2 * 3), facecolor="black", subplot_kw={'projection': 'polar'})
+    axes = axes.flatten()
     datas = dict()
+    rating_datas = dict()
     for gidx, group_name in enumerate(ct.pr.sel_groups):
         group = Group(group_name, ct)
         con = group.load_ga_con()[cluster_trial[group_name]]["wpli"]
         con_data = con.get_data("dense")[:, :, 0]
         labels = con.names
-        datas[group_name] = con_data
+        if group_name in ["Hohes Rating", "Niedriges Rating"]:
+            rating_datas[group_name] = con_data
+        else:
+            datas[group_name] = con_data
+    label_names = [label_alias.get(lb, lb) for lb in labels]
     values = np.asarray(list(datas.values()))
-    data_mean = np.mean(values, axis=0)
+    vmin_data = np.min(values[values > 0])
+    vmax_data = np.max(values)
+    rating_values = np.asarray(list(rating_datas.values()))
+    vmin_rating = np.min(rating_values[rating_values > 0])
+    vmax_rating = np.max(rating_values)
+    datas.update(rating_datas)
 
     for idx, (group_name, con_data) in enumerate(datas.items()):
         node_angles = circular_layout(
-            labels, labels, start_pos=90, group_boundaries=[0, len(labels) / 2]
+            label_names, label_names, start_pos=90
         )
+        if group_name in ["Hohes Rating", "Niedriges Rating"]:
+            vmin = vmin_rating
+            vmax = vmax_rating
+        else:
+            vmin = vmin_data
+            vmax = vmax_data
         plot_connectivity_circle(
             con_data,
-            labels,
+            label_names,
             node_angles=node_angles,
             node_colors=[label_colors[lb] for lb in labels],
             ax=axes[idx],
             title=group_name,
+            fontsize_names=11,
+            fontsize_title=14,
+            colorbar_pos=(-0.3, 0.2),
             padding=0,
+            vmin=vmin,
+            vmax=vmax
         )
+    fig.tight_layout()
     if show_plots:
         fig.show()
 
     Group("all", ct).plot_save("ga_connectivity", matplotlib_figure=fig)
+
+
+def create_source_insets(ct, target_labels, label_colors):
+    fsmri = FSMRI("fsaverage", ct)
+    with mne.viz.use_3d_backend("pyvista"):
+
+        Brain = mne.viz.get_brain_class()
+        brain = Brain(
+            subject=fsmri.name,
+            hemi="lh",
+            surf="inflated",
+            subjects_dir=fsmri.subjects_dir,
+            views="lateral",
+            background="white",
+            size=(400, 300)
+        )
+        brain.show_view("lateral", distance=300)
+        labels = fsmri.get_labels(target_labels)
+        for label in labels:
+            brain.remove_labels()
+            color = label_colors.get(label.name)
+            if color is None:
+                color = label.color
+            brain.add_label(label, borders=False, color=color)
+            fsmri.plot_save("labels", brain=brain)
+            brain.save_image(join(Path(__file__).parent, f"{label.name}.png"))

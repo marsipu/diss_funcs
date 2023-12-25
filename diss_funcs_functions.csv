@@ -10,7 +10,7 @@ remove_metadata;;MEEG;Ratings;Diss;False;False;;diss_funcs;diss_funcs;meeg
 add_ratings_meta;;MEEG;Ratings;Diss;False;False;;diss_funcs;diss_funcs;meeg
 get_load_cell_events_regression_baseline;;MEEG;Compute;Diss;False;False;;diss_funcs;diss_funcs;meeg,min_duration,shortest_event,adjust_timeline_by_msec,diff_window,min_ev_distance,max_ev_distance,len_baseline,baseline_limit,regression_degree,trig_channel,n_jobs
 plot_gfp_group_stacked;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,ch_types,show_plots,save_plots
-plot_ltc_group_stacked;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,target_labels,label_colors,inverse_method,show_plots,cluster_trial
+plot_ltc_group_stacked;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,target_labels,label_colors,label_alias,show_plots,cluster_trial
 plot_ratings_evoked_comparision;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,group_colors,show_plots,n_jobs
 plot_load_cell_group_ave;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,trig_plt_time,baseline_limit,show_plots,apply_savgol,trig_channel
 plot_ratings_combined;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,rating_groups,show_plots
@@ -27,3 +27,4 @@ plot_velo_evoked;;Group;Plot;Diss;True;False;;diss_funcs;diss_funcs;group,show_p
 combine_meegs_rating;;MEEG;Ratings;Diss;False;False;;diss_funcs;diss_funcs;meeg,combine_groups
 plot_rating_share;;Other;Ratings;Diss;True;False;;diss_funcs;diss_funcs;ct
 plot_all_connectivity;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,show_plots
+create_source_insets;;Other;Preparation;Diss;False;True;;diss_funcs;diss_funcs;ct,target_labels,label_colors
