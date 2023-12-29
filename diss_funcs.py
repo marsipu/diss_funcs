@@ -2109,6 +2109,8 @@ def combine_meegs_rating(meeg, combine_groups):
         new_metadata["Stimulus"] = stims[0]
         new_metadata["id"] = new_id
 
+        # ToDo: Combine here also epoched Source Estimates
+        #  (apply_inverse_epochs per subject and then picking epochs with indices for source-analysis)
         for epo, stim in zip(all_epochs[1:], stims[1:]):
             new_data = np.concatenate((new_data, epo.get_data()), axis=0)
             e2_events = epo.events.copy()
@@ -2124,7 +2126,7 @@ def combine_meegs_rating(meeg, combine_groups):
 
         combined_epochs = mne.EpochsArray(new_data, epochs.info, new_events, tmin=epochs.tmin,
                                           event_id={"Stimulation": 1},
-                                          baseline=epochs.baseline, metadata=new_metadata)
+                                          baseline=None, metadata=new_metadata)
         epochs_high = combined_epochs[
             combined_epochs.metadata.reset_index().sort_values(by="rating").index[len(combined_epochs) // 2:]]
         epochs_low = combined_epochs[
