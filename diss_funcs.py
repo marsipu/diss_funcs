@@ -1,3 +1,4 @@
+import gc
 import itertools
 import re
 import sys
@@ -16,7 +17,7 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 from matplotlib.pyplot import colormaps
 from matplotlib.ticker import FuncFormatter
-from mne.minimum_norm import source_induced_power
+from mne.minimum_norm import source_induced_power, apply_inverse_epochs
 from mne.stats import (
     permutation_cluster_test,
     permutation_cluster_1samp_test,
@@ -2076,7 +2077,7 @@ def _get_group(meeg_name, groups):
     return None
 
 
-def combine_meegs_rating(meeg, combine_groups):
+def combine_meegs_rating(meeg, inverse_method, combine_groups):
     group_names = dict()
     for group_name in combine_groups:
         group_names[group_name] = Group(group_name, meeg.ct).group_list
@@ -2091,13 +2092,24 @@ def combine_meegs_rating(meeg, combine_groups):
             print(f"{meeg.name} already combined")
             return
         all_epochs = [meeg.load_epochs()]
+        inv = meeg.load_inverse_operator()
+        all_stcs = [apply_inverse_epochs(all_epochs[0], inv, 1.0 / 3.0 ** 2, method=inverse_method,
+                                        return_generator=True)]
         stims = [_get_group(meeg.name, group_names)]
-        for other_meeg in [m for m in meeg.pr.all_meeg if m != meeg.name and _get_group(m, group_names) is not None]:
-            match = re.match(sub_name + first_pattern, other_meeg)
+        for other_meeg_name in [m for m in meeg.pr.all_meeg if
+                                m != meeg.name and _get_group(m, group_names) is not None]:
+            match = re.match(sub_name + first_pattern, other_meeg_name)
             if match:
-                all_epochs.append(MEEG(other_meeg, meeg.ct).load_epochs())
-                stims.append(_get_group(other_meeg, group_names))
-                print(f"Found {other_meeg} for {meeg.name}")
+                other_meeg = MEEG(other_meeg_name, meeg.ct)
+                other_epochs = other_meeg.load_epochs()
+                other_invop = other_meeg.load_inverse_operator()
+                all_epochs.append(other_epochs)
+                lambda2 = 1.0 / 3.0 ** 2
+                other_stcs = apply_inverse_epochs(other_epochs, other_invop, lambda2, method=inverse_method,
+                                                  return_generator=True)
+                all_stcs.append(other_stcs)
+                stims.append(_get_group(other_meeg_name, group_names))
+                print(f"Found {other_meeg_name} for {meeg.name}")
 
         new_id = 1
         all_epochs = mne.channels.equalize_channels(all_epochs)
@@ -2109,8 +2121,6 @@ def combine_meegs_rating(meeg, combine_groups):
         new_metadata["Stimulus"] = stims[0]
         new_metadata["id"] = new_id
 
-        # ToDo: Combine here also epoched Source Estimates
-        #  (apply_inverse_epochs per subject and then picking epochs with indices for source-analysis)
         for epo, stim in zip(all_epochs[1:], stims[1:]):
             new_data = np.concatenate((new_data, epo.get_data()), axis=0)
             e2_events = epo.events.copy()
@@ -2124,25 +2134,64 @@ def combine_meegs_rating(meeg, combine_groups):
             meta2["id"] = new_id
             new_metadata = pd.concat([new_metadata, meta2], axis=0, ignore_index=True)
 
+        event_id = {"Stimulation": 1}
         combined_epochs = mne.EpochsArray(new_data, epochs.info, new_events, tmin=epochs.tmin,
-                                          event_id={"Stimulation": 1},
+                                          event_id=event_id,
                                           baseline=None, metadata=new_metadata)
-        epochs_high = combined_epochs[
-            combined_epochs.metadata.reset_index().sort_values(by="rating").index[len(combined_epochs) // 2:]]
-        epochs_low = combined_epochs[
-            combined_epochs.metadata.reset_index().sort_values(by="rating").index[:len(combined_epochs) // 2]]
-        for name, epoch, group_name in zip([new_high_name, new_low_name], [epochs_high, epochs_low],
-                                           ["HighR", "LowR"]):
+        meta = combined_epochs.metadata.copy()
+        meta.dropna(axis=0, subset="rating", inplace=True)
+        sort_index = meta.sort_values(by="rating").index
+        idxs_high = sort_index[len(combined_epochs) // 2:]
+        epochs_high = combined_epochs[idxs_high]
+        idxs_low = sort_index[:len(combined_epochs) // 2]
+        epochs_low = combined_epochs[idxs_low]
+        for name, epoch, group_name in zip(
+                [new_high_name, new_low_name], [epochs_high, epochs_low], ["HighR", "LowR"]):
             new_meeg = meeg.pr.add_meeg(name)
             meeg.pr.meeg_to_fsmri[name] = meeg.fsmri.name
-            meeg.pr.sel_event_id[name] = meeg.sel_trials
-            meeg.pr.meeg_event_id[name] = meeg.event_id
+            meeg.pr.sel_event_id[name] = ["Stimulation"]
+            meeg.pr.meeg_event_id[name] = event_id
             new_meeg.save_epochs(epoch)
             print(f"Combined {len(all_epochs)} measurements to {name}")
             if group_name not in meeg.pr.all_groups:
                 meeg.pr.all_groups[group_name] = [name]
             else:
                 meeg.pr.all_groups[group_name].append(name)
+
+        stc_data_high = None
+        stc_data_low = None
+
+        epo_idx = 0
+        for stc_gen in all_stcs:
+            for stc in stc_gen:
+                vertices = stc.vertices
+                tmin = stc.tmin
+                tstep = stc.tstep
+                subject = stc.subject
+                if epo_idx in idxs_high:
+                    if stc_data_high is None:
+                        stc_data_high = stc.data
+                    else:
+                        stc_data_high += stc.data
+                elif epo_idx in idxs_low:
+                    if stc_data_low is None:
+                        stc_data_low = stc.data
+                    else:
+                        stc_data_low += stc.data
+                else:
+                    pass
+                epo_idx += 1
+        # Take average
+        stc_data_high /= len(idxs_high)
+        stc_data_low /= len(idxs_low)
+
+        for name, stc_data, group_name in zip(
+                [new_high_name, new_low_name], [stc_data_high, stc_data_low], ["HighR", "LowR"]):
+            new_meeg = MEEG(name, meeg.ct)
+            stc = mne.SourceEstimate(
+                data=stc_data, vertices=vertices, tmin=tmin, tstep=tstep, subject=subject)
+            new_meeg.save_source_estimates({"Stimulation": stc})
+
     meeg.pr.save()
 
 
