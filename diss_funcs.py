@@ -2078,6 +2078,7 @@ def _get_group(meeg_name, groups):
 
 
 def combine_meegs_rating(meeg, inverse_method, combine_groups):
+    combine_stc = False
     group_names = dict()
     for group_name in combine_groups:
         group_names[group_name] = Group(group_name, meeg.ct).group_list
@@ -2093,8 +2094,9 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups):
             return
         all_epochs = [meeg.load_epochs()]
         inv = meeg.load_inverse_operator()
-        all_stcs = [apply_inverse_epochs(all_epochs[0], inv, 1.0 / 3.0 ** 2, method=inverse_method,
-                                        return_generator=True)]
+        if combine_stc:
+            all_stcs = [apply_inverse_epochs(all_epochs[0], inv, 1.0 / 3.0 ** 2, method=inverse_method,
+                                            return_generator=True)]
         stims = [_get_group(meeg.name, group_names)]
         for other_meeg_name in [m for m in meeg.pr.all_meeg if
                                 m != meeg.name and _get_group(m, group_names) is not None]:
@@ -2105,9 +2107,10 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups):
                 other_invop = other_meeg.load_inverse_operator()
                 all_epochs.append(other_epochs)
                 lambda2 = 1.0 / 3.0 ** 2
-                other_stcs = apply_inverse_epochs(other_epochs, other_invop, lambda2, method=inverse_method,
-                                                  return_generator=True)
-                all_stcs.append(other_stcs)
+                if combine_stc:
+                    other_stcs = apply_inverse_epochs(other_epochs, other_invop, lambda2, method=inverse_method,
+                                                      return_generator=True)
+                    all_stcs.append(other_stcs)
                 stims.append(_get_group(other_meeg_name, group_names))
                 print(f"Found {other_meeg_name} for {meeg.name}")
 
@@ -2158,39 +2161,40 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups):
             else:
                 meeg.pr.all_groups[group_name].append(name)
 
-        stc_data_high = None
-        stc_data_low = None
+        if combine_stc:
+            stc_data_high = None
+            stc_data_low = None
 
-        epo_idx = 0
-        for stc_gen in all_stcs:
-            for stc in stc_gen:
-                vertices = stc.vertices
-                tmin = stc.tmin
-                tstep = stc.tstep
-                subject = stc.subject
-                if epo_idx in idxs_high:
-                    if stc_data_high is None:
-                        stc_data_high = stc.data
+            epo_idx = 0
+            for stc_gen in all_stcs:
+                for stc in stc_gen:
+                    vertices = stc.vertices
+                    tmin = stc.tmin
+                    tstep = stc.tstep
+                    subject = stc.subject
+                    if epo_idx in idxs_high:
+                        if stc_data_high is None:
+                            stc_data_high = stc.data
+                        else:
+                            stc_data_high += stc.data
+                    elif epo_idx in idxs_low:
+                        if stc_data_low is None:
+                            stc_data_low = stc.data
+                        else:
+                            stc_data_low += stc.data
                     else:
-                        stc_data_high += stc.data
-                elif epo_idx in idxs_low:
-                    if stc_data_low is None:
-                        stc_data_low = stc.data
-                    else:
-                        stc_data_low += stc.data
-                else:
-                    pass
-                epo_idx += 1
-        # Take average
-        stc_data_high /= len(idxs_high)
-        stc_data_low /= len(idxs_low)
+                        pass
+                    epo_idx += 1
+            # Take average
+            stc_data_high /= len(idxs_high)
+            stc_data_low /= len(idxs_low)
 
-        for name, stc_data, group_name in zip(
-                [new_high_name, new_low_name], [stc_data_high, stc_data_low], ["HighR", "LowR"]):
-            new_meeg = MEEG(name, meeg.ct)
-            stc = mne.SourceEstimate(
-                data=stc_data, vertices=vertices, tmin=tmin, tstep=tstep, subject=subject)
-            new_meeg.save_source_estimates({"Stimulation": stc})
+            for name, stc_data, group_name in zip(
+                    [new_high_name, new_low_name], [stc_data_high, stc_data_low], ["HighR", "LowR"]):
+                new_meeg = MEEG(name, meeg.ct)
+                stc = mne.SourceEstimate(
+                    data=stc_data, vertices=vertices, tmin=tmin, tstep=tstep, subject=subject)
+                new_meeg.save_source_estimates({"Stimulation": stc})
 
     meeg.pr.save()
 
