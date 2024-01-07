@@ -2148,6 +2148,7 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups):
         epochs_high = combined_epochs[idxs_high]
         idxs_low = sort_index[:len(combined_epochs) // 2]
         epochs_low = combined_epochs[idxs_low]
+        trans = meeg.load_transformation()
         for name, epoch, group_name in zip(
                 [new_high_name, new_low_name], [epochs_high, epochs_low], ["HighR", "LowR"]):
             new_meeg = meeg.pr.add_meeg(name)
@@ -2155,6 +2156,7 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups):
             meeg.pr.sel_event_id[name] = ["Stimulation"]
             meeg.pr.meeg_event_id[name] = event_id
             new_meeg.save_epochs(epoch)
+            new_meeg.save_transformation(trans)
             print(f"Combined {len(all_epochs)} measurements to {name}")
             if group_name not in meeg.pr.all_groups:
                 meeg.pr.all_groups[group_name] = [name]
