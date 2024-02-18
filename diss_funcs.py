@@ -25,7 +25,7 @@ from mne.stats import (
 )
 from mne.viz import circular_layout
 from mne_connectivity.viz import plot_connectivity_circle
-from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events
+from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events, epoch_raw, apply_ica
 from mne_pipeline_hd.pipeline.loading import MEEG, Group, FSMRI
 from scipy.signal import find_peaks, savgol_filter
 from scipy.stats import ttest_1samp
@@ -2070,48 +2070,76 @@ def plot_velo_evoked(group, show_plots):
     group.plot_save("velo_comparision", matplotlib_figure=fig)
 
 
-def _get_group(meeg_name, groups):
-    for group_name, group in groups.items():
-        if meeg_name in group:
+def _get_group(meeg_name, groups, ct):
+    for group_name in groups:
+        group_names = Group(group_name, ct).group_list
+        if meeg_name in group_names:
             return group_name
     return None
 
 
-def combine_meegs_rating(meeg, inverse_method, combine_groups):
-    combine_stc = False
-    group_names = dict()
-    for group_name in combine_groups:
-        group_names[group_name] = Group(group_name, meeg.ct).group_list
-    if _get_group(meeg.name, group_names) is not None:
+def combine_meegs_rating(meeg, inverse_method, combine_groups, ch_types,
+                         ch_names,
+                         t_epoch,
+                         baseline,
+                         apply_proj,
+                         reject,
+                         flat,
+                         reject_by_annotation,
+                         bad_interpolation,
+                         use_autoreject,
+                         consensus_percs,
+                         n_interpolates,
+                         overwrite_ar,
+                         decim,
+                         n_jobs,
+                         n_pca_components):
+    combine_stc = True
+    if _get_group(meeg.name, combine_groups, meeg.ct) is not None:
         first_pattern = r"_(\w{0,7})([ab_]*)"
         pattern = r"([p,l]{2}\d{1,2}a?)" + first_pattern
         match = re.match(pattern, meeg.name)
         sub_name = match.group(1)
         new_high_name = f"{sub_name}_combined_high"
         new_low_name = f"{sub_name}_combined_low"
-        if new_high_name in meeg.pr.all_meeg and new_low_name in meeg.pr.all_meeg:
-            print(f"{meeg.name} already combined")
-            return
-        all_epochs = [meeg.load_epochs()]
-        inv = meeg.load_inverse_operator()
+        all_epochs = []
         if combine_stc:
-            all_stcs = [apply_inverse_epochs(all_epochs[0], inv, 1.0 / 3.0 ** 2, method=inverse_method,
-                                            return_generator=True)]
-        stims = [_get_group(meeg.name, group_names)]
-        for other_meeg_name in [m for m in meeg.pr.all_meeg if
-                                m != meeg.name and _get_group(m, group_names) is not None]:
+            all_stcs = []
+        stims = []
+        for other_meeg_name in [m for m in meeg.pr.all_meeg if _get_group(meeg.name, combine_groups, meeg.ct) is not None]:
             match = re.match(sub_name + first_pattern, other_meeg_name)
             if match:
                 other_meeg = MEEG(other_meeg_name, meeg.ct)
+                # This creates epochs which are not baselined to split into the rating groups
+                # and then baselines them afterwards to keep them consistent with other epochs.
+                epoch_raw(other_meeg, ch_types,
+                          ch_names,
+                          t_epoch,
+                          None,
+                          apply_proj,
+                          reject,
+                          flat,
+                          reject_by_annotation,
+                          bad_interpolation,
+                          use_autoreject,
+                          consensus_percs,
+                          n_interpolates,
+                          overwrite_ar,
+                          decim,
+                          n_jobs)
+                add_ratings_meta(other_meeg)
+                apply_ica(other_meeg, ica_apply_target="epochs", n_pca_components=n_pca_components)
                 other_epochs = other_meeg.load_epochs()
-                other_invop = other_meeg.load_inverse_operator()
                 all_epochs.append(other_epochs)
+                baselined_epochs = other_epochs.copy().apply_baseline(baseline)
+                other_meeg.save_epochs(baselined_epochs)
                 lambda2 = 1.0 / 3.0 ** 2
                 if combine_stc:
+                    other_invop = other_meeg.load_inverse_operator()
                     other_stcs = apply_inverse_epochs(other_epochs, other_invop, lambda2, method=inverse_method,
                                                       return_generator=True)
                     all_stcs.append(other_stcs)
-                stims.append(_get_group(other_meeg_name, group_names))
+                stims.append(_get_group(meeg.name, combine_groups, meeg.ct))
                 print(f"Found {other_meeg_name} for {meeg.name}")
 
         new_id = 1
@@ -2155,8 +2183,13 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups):
             meeg.pr.meeg_to_fsmri[name] = meeg.fsmri.name
             meeg.pr.sel_event_id[name] = ["Stimulation"]
             meeg.pr.meeg_event_id[name] = event_id
+            # Apply baseline here
+            epoch.apply_baseline(baseline)
             new_meeg.save_epochs(epoch)
-            new_meeg.save_transformation(trans)
+            try:
+                new_meeg.save_transformation(trans)
+            except TypeError:
+                print(f"Could not save transformation for {name}")
             print(f"Combined {len(all_epochs)} measurements to {name}")
             if group_name not in meeg.pr.all_groups:
                 meeg.pr.all_groups[group_name] = [name]
@@ -2232,6 +2265,37 @@ def plot_rating_share(ct, combine_groups, group_colors, show_plots):
         plt.show()
     plot_group = Group("all", ct)
     plot_group.plot_save("rating_share", matplotlib_figure=fig)
+
+
+def plot_rating_combination_test(meeg, combine_groups, show_plots):
+    if _get_group(meeg.name, combine_groups, meeg.ct) is not None:
+        first_pattern = r"_(\w{0,7})([ab_]*)"
+        pattern = r"([p,l]{2}\d{1,2}a?)" + first_pattern
+        match = re.match(pattern, meeg.name)
+        sub_name = match.group(1)
+        new_high_name = f"{sub_name}_combined_high"
+        new_low_name = f"{sub_name}_combined_low"
+        orig_evoked = meeg.load_evokeds()[0]
+        gfp = calculate_gfp(orig_evoked)["grad"]
+        fig, ax = plt.subplots()
+        ax.plot(orig_evoked.times, gfp, label=meeg.name)
+
+        other_meegs = [m for m in meeg.pr.all_meeg if re.match(sub_name + first_pattern, m) and m != meeg.name and _get_group(m, combine_groups, meeg.ct) is not None]
+        other_meegs += [new_high_name, new_low_name]
+
+        for other_meeg_name in other_meegs:
+            other_meeg = MEEG(other_meeg_name, meeg.ct)
+            evoked = other_meeg.load_evokeds()[0]
+            gfp = calculate_gfp(evoked)["grad"]
+            ax.plot(evoked.times, gfp, label=other_meeg_name)
+
+
+        ax.legend()
+        plt.tight_layout()
+        if show_plots:
+            plt.show()
+    else:
+        print(f"{meeg.name} not in combine_groups")
 
 
 def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
