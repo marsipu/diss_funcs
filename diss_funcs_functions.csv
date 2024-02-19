@@ -12,6 +12,7 @@ get_load_cell_events_regression_baseline;;MEEG;Compute;Diss;False;False;;diss_fu
 plot_gfp_group_stacked;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,ch_types,show_plots,save_plots
 plot_ltc_group_stacked;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,group_colors,target_labels,label_colors,label_alias,show_plots,cluster_trial
 plot_ratings_evoked_comparision;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,ch_types,group_colors,show_plots,n_jobs
+plot_ratings_ltc_comparision;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,target_labels,label_alias,label_colors,group_colors,show_plots,n_jobs
 plot_load_cell_group_ave;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,trig_plt_time,baseline_limit,show_plots,apply_savgol,trig_channel
 plot_ratings_combined;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;ct,rating_groups,show_plots
 plot_rating_share;;Other;Plot;Diss;True;False;;diss_funcs;diss_funcs;,combine_groups,group_colors,show_plots

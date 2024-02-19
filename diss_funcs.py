@@ -983,16 +983,16 @@ ch_type_names = {"eeg": "EEG", "grad": "MEG"}
 def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jobs):
     """Evokedsa are compared for lower and higher rating."""
     for ch_type in ch_types:
-        nrows, ncols, ax_idxs = _get_n_subplots(len(ct.pr.sel_groups))
-        fs = [figsize[0], figsize[1] * nrows]
+        nrows = 1
+        ncols = len(ct.pr.sel_groups)
         fig, ax = plt.subplots(
             nrows=nrows,
             ncols=ncols,
             sharex=True,
             sharey=True,
-            figsize=fs,
+            figsize=(2 * ncols, 2 * nrows),
         )
-        for group_name, ax_idx in zip(ct.pr.sel_groups, ax_idxs):
+        for ax_idx, group_name in enumerate(ct.pr.sel_groups):
             group = Group(group_name, ct)
             gfps = dict()
             rating_queries = ["Lower_Ratings", "Higher_Ratings"]
@@ -1030,9 +1030,7 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
                 times,
                 rating_queries,
                 one_sample=True,
-                show_plots=show_plots,
                 n_jobs=n_jobs,
-                unit="A/m" if ch_type == "grad" else "V",
                 ax=ax[ax_idx],
                 sfreq=sfreq,
                 hpass=1,
@@ -1050,6 +1048,91 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
             ax[ax_idx].legend(loc="upper right", fontsize="small")
         fig.suptitle(ct.pr.name)
         Group(ct.pr.name, ct).plot_save("compare_ratings", trial=ch_type)
+
+
+def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, group_colors, show_plots, n_jobs):
+    """Evokedsa are compared for lower and higher rating."""
+    nrows = len(target_labels)
+    ncols = len(ct.pr.sel_groups)
+    fig, axes = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        sharex=True,
+        sharey=True,
+        figsize=(ncols * 3, nrows * 2),
+    )
+    data_df = pd.DataFrame([], columns=["Vergleich", "Label", "Zeit", "p-Wert"])
+    global cluster_counter
+    cluster_counter = 1
+    bonferroni_factor = nrows * ncols
+    for col_idx, group_name in enumerate(ct.pr.sel_groups):
+        group = Group(group_name, ct)
+        ltc_dict = dict()
+        rating_groups = ["Lower_Ratings", "Higher_Ratings"]
+        alphas = {"Lower_Ratings": 0.5, "Higher_Ratings": 1}
+        # These trials need to be set in queries in the pipeline
+        for query_trial in rating_groups:
+            ltc_dict[query_trial] = dict()
+            for label in target_labels:
+                ltc_dict[query_trial][label] = dict()
+                for ltcs, meeg in group.load_items(
+                        obj_type="MEEG", data_type="ltc"
+                ):
+                    ltcs = ltcs[query_trial]
+                    times = ltcs[label][1]
+                    ltc_dict[query_trial][label][meeg.name] = ltcs[label][0]
+
+        if ct.pr.name == "Experiment1":
+            for trial in ltc_dict:
+                for label in ltc_dict[trial]:
+                    ltc_dict[trial][label] = _merge_measurements(ltc_dict[trial][label])
+
+        for row_idx, label_name in enumerate(target_labels):
+            group_data = list()
+            for query_trial, query_data in ltc_dict.items():
+                group_data.append(np.asarray(list(query_data[label_name].values())))
+
+            factor, unit = _convert_units(np.min(group_data), "")
+
+            cluster_data = _plot_permutation_cluster_test(
+                group_data,
+                times,
+                group_names=rating_groups,
+                one_sample=True,
+                ax=axes[row_idx, col_idx],
+                n_jobs=n_jobs,
+                group_colors=group_colors,
+                factor=factor,
+                ylabel=f"dSPM-Wert [{unit}]",
+                bonferroni_factor=bonferroni_factor,
+                group_alphas=alphas,
+            )
+            _add_label_inset(axes[row_idx, col_idx], label_name, [0.05, 0.7, 0.25, 0.25])
+            for cld in cluster_data:
+                data_dict = {
+                    "Vergleich": " - ".join(rating_groups),
+                    "Label": label_name,
+                    "Zeit": f"{cld['start']}-{cld['stop']}",
+                    "p-Wert": cld["p_val"],
+                }
+                data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+
+    xtitles = {g: group_colors[g] for g in ct.pr.sel_groups}
+    ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
+    xlabel = "Zeit [s]"
+    ylabel = "Quellen Amplitude"
+    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
+
+    plot_group = Group("all", ct)
+    plot_group.plot_save("ltc_rating_comp", matplotlib_figure=fig)
+    if show_plots:
+        plt.show()
+    exp = "exp1" if "1" in ct.pr.name else "exp2"
+    latex_path = join(plot_group.figures_path, f"{exp}_ltc_rating_stats.tex")
+    _save_latex_table(
+        data_df, latex_path,
+        caption="Signifikante Cluster der Cluster--Permutationstests im Quellen-Raum. p--Werte sind Bonferroni--korrigiert.",
+        label=f"tab:{exp}_ltc_rating_stats")
 
 
 def plot_load_cell_group_ave(
@@ -2308,35 +2391,23 @@ def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
                              subplot_kw={'projection': 'polar'})
     axes = axes.flatten()
     datas = dict()
-    rating_datas = dict()
     for gidx, group_name in enumerate(ct.pr.sel_groups):
         group = Group(group_name, ct)
         con = group.load_ga_con()[cluster_trial[group_name]]["wpli"]
         con_data = con.get_data("dense")[:, :, 0]
         labels = con.names
-        if group_name in ["HighR", "LowR"]:
-            rating_datas[group_name] = con_data
-        else:
-            datas[group_name] = con_data
+        datas[group_name] = con_data
     label_names = [label_alias.get(lb, lb) for lb in labels]
     values = np.asarray(list(datas.values()))
     vmin_data = np.min(values[values > 0])
     vmax_data = np.max(values)
-    rating_values = np.asarray(list(rating_datas.values()))
-    vmin_rating = np.min(rating_values[rating_values > 0])
-    vmax_rating = np.max(rating_values)
-    datas.update(rating_datas)
 
     for idx, (group_name, con_data) in enumerate(datas.items()):
         node_angles = circular_layout(
             label_names, label_names, start_pos=90
         )
-        if group_name in ["HighR", "LowR"]:
-            vmin = vmin_rating
-            vmax = vmax_rating
-        else:
-            vmin = vmin_data
-            vmax = vmax_data
+        vmin = vmin_data
+        vmax = vmax_data
         plot_connectivity_circle(
             con_data,
             label_names,
