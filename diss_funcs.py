@@ -982,17 +982,20 @@ ch_type_names = {"eeg": "EEG", "grad": "MEG"}
 
 def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jobs):
     """Evokedsa are compared for lower and higher rating."""
-    for ch_type in ch_types:
-        nrows = 1
-        ncols = len(ct.pr.sel_groups)
-        fig, ax = plt.subplots(
-            nrows=nrows,
-            ncols=ncols,
-            sharex=True,
-            sharey=True,
-            figsize=(2 * ncols, 2 * nrows),
-        )
-        for ax_idx, group_name in enumerate(ct.pr.sel_groups):
+    nrows = len(ch_types)
+    ncols = len(ct.pr.sel_groups)
+    fig, ax = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        sharex=True,
+        sharey="row",
+        figsize=(3 * ncols, 2 * nrows),
+    )
+    data_df = pd.DataFrame([], columns=["Gruppe", "Kanaltyp", "Zeit", "p-Wert"])
+    if nrows == 1:
+        ax = np.asarray([ax])
+    for row_idx, ch_type in enumerate(ch_types):
+        for col_idx, group_name in enumerate(ct.pr.sel_groups):
             group = Group(group_name, ct)
             gfps = dict()
             rating_queries = ["Lower_Ratings", "Higher_Ratings"]
@@ -1022,32 +1025,50 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
             for query_trial in gfps:
                 query_list = list()
                 for key, value in gfps[query_trial].items():
-                    # Only use Gradiometer for now
                     query_list.append(value[ch_type])
                 group_data.append(np.asarray(query_list))
-            _plot_permutation_cluster_test(
+
+            unit = "V" if ch_type == "eeg" else "Am"
+            factor, unit = _convert_units(np.min(group_data), unit)
+
+            cluster_data = _plot_permutation_cluster_test(
                 group_data,
                 times,
                 rating_queries,
                 one_sample=True,
                 n_jobs=n_jobs,
-                ax=ax[ax_idx],
+                ax=ax[row_idx, col_idx],
                 sfreq=sfreq,
                 hpass=1,
                 lpass=30,
+                factor=factor,
+                ylabel=f"Spannung [{unit}]" if ch_type == "eeg" else f"Feldstärke [{unit}]",
                 group_colors=colors,
                 group_alphas=alphas,
+                bonferroni_factor=ncols,
             )
-            ax[ax_idx].set_title(f"{group.name} - {ch_type_names[ch_type]}")
-            ax[ax_idx].set_xlabel("Zeit (s)")
-            if ch_type == "grad":
-                ax[ax_idx].set_ylabel("Magnetfeldstärke (A/m)")
-            else:
-                ax[ax_idx].set_ylabel("elektrische Spannung (V)")
-            ax[ax_idx].label_outer()
-            ax[ax_idx].legend(loc="upper right", fontsize="small")
-        fig.suptitle(ct.pr.name)
-        Group(ct.pr.name, ct).plot_save("compare_ratings", trial=ch_type)
+
+            for cld in cluster_data:
+                data_dict = {
+                    "Gruppe": group_name,
+                    "Kanaltyp": ch_type_names[ch_type],
+                    "Zeit": f"{cld['start']}-{cld['stop']}",
+                    "p-Wert": cld["p_val"],
+                }
+                data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+
+    ct_alias = {"eeg": "EEG", "grad": "MEG"}
+    xtitles = {g: group_colors[g] for g in ct.pr.sel_groups}
+    ytitles = {ct_alias[ct]: "k" for ct in ch_types}
+    _2d_grid_titles_and_labels(fig, ax, xtitles, ytitles)
+    plot_group = Group("all", ct)
+    plot_group.plot_save("evoked_ratings", matplotlib_figure=fig)
+    exp = "exp1" if "1" in ct.pr.name else "exp2"
+    latex_path = join(plot_group.figures_path, f"{exp}_evoked_rating_stats.tex")
+    _save_latex_table(
+        data_df, latex_path,
+        caption="Signifikante Cluster eines 1-sample-cluster-permutations-tests für die GFP von höherem gegen niedrigerem Rating. p--Werte sind Bonferroni--korrigiert.",
+        label=f"tab:{exp}_evoked_rating_stats")
 
 
 def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, group_colors, show_plots, n_jobs):
@@ -1124,14 +1145,14 @@ def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, g
     _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
 
     plot_group = Group("all", ct)
-    plot_group.plot_save("ltc_rating_comp", matplotlib_figure=fig)
+    plot_group.plot_save("ltc_ratings", matplotlib_figure=fig)
     if show_plots:
         plt.show()
     exp = "exp1" if "1" in ct.pr.name else "exp2"
     latex_path = join(plot_group.figures_path, f"{exp}_ltc_rating_stats.tex")
     _save_latex_table(
         data_df, latex_path,
-        caption="Signifikante Cluster der Cluster--Permutationstests im Quellen-Raum. p--Werte sind Bonferroni--korrigiert.",
+        caption="Signifikante Cluster eines 1-sample-cluster-permutations-tests für die Label-Time-Courses von höherem gegen niedrigerem Rating. p--Werte sind Bonferroni--korrigiert.",
         label=f"tab:{exp}_ltc_rating_stats")
 
 
