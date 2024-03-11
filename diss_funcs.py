@@ -1,4 +1,3 @@
-import gc
 import itertools
 import re
 import sys
@@ -1541,9 +1540,26 @@ def _save_latex_table(data_df, latex_path, caption, label):
 
 
 def evoked_temporal_cluster(
-        ct, ch_types, group_colors, compare_groups, cluster_trial, n_jobs, show_plots
+        ct, ch_types, group_colors, compare_groups, cluster_trial, n_jobs, show_plots, plot_language,
 ):
     """A 1sample-permutation-cluster-test with clustering in time is performed between the evoked of two stimulus-groups."""
+    lang_dict = {
+        "deutsch": {
+            "xlabel": "Zeit [s]",
+            "volt": "elektrische Spannung",
+            "mag": "Feldstärke",
+            "columns": ["Vergleich", "Kanaltyp", "Zeit", "p-Wert"],
+            "caption": "Signifikante Cluster der Cluster--Permutationstests. p--Werte sind Bonferroni--korrigiert.",
+        },
+        "english": {
+            "xlabel": "Time [s]",
+            "volt": "Voltage",
+            "mag": "Field strength",
+            "columns": ["Comparison", "Channel type", "Time", "p-value"],
+            "caption": "Significant clusters of the cluster-permutation-tests. p-values are Bonferroni-corrected.",
+        }
+    }
+    lang_dict = lang_dict[plot_language]
 
     nrows = len(ch_types)
     ncols = len(compare_groups)
@@ -1552,10 +1568,10 @@ def evoked_temporal_cluster(
         ncols=ncols,
         sharex=True,
         sharey="row",
-        figsize=(2 * ncols, 2 * nrows),
+        figsize=(3 * ncols, 2.5 * nrows),
 
     )
-    data_df = pd.DataFrame([], columns=["Vergleich", "Kanaltyp", "Zeit", "p-Wert"])
+    data_df = pd.DataFrame([], columns=lang_dict["columns"])
     if nrows == 1:
         axes = np.asarray([axes])
     global cluster_counter
@@ -1585,7 +1601,7 @@ def evoked_temporal_cluster(
                     datas = _merge_measurements(datas)
                 group_data.append(np.asarray(list(datas.values())))
 
-            unit = "V" if ch_type == "eeg" else "Am"
+            unit = "V" if ch_type == "eeg" else "T/cm"
             factor, unit = _convert_units(np.min(group_data), unit)
 
             cluster_data = _plot_permutation_cluster_test(
@@ -1597,7 +1613,8 @@ def evoked_temporal_cluster(
                 group_colors=group_colors,
                 ax=axes[row_idx, col_idx],
                 factor=factor,
-                ylabel=f"Spannung [{unit}]" if ch_type == "eeg" else f"Feldstärke [{unit}]",
+                xlabel=lang_dict["xlabel"],
+                ylabel=f"{lang_dict['volt']} [{unit}]" if ch_type == "eeg" else f"{lang_dict['mag']} [{unit}]",
                 bonferroni_factor=bonferroni_factor
             )
             for cld in cluster_data:
@@ -1611,21 +1628,37 @@ def evoked_temporal_cluster(
     xtitles = {"-".join(cg): "k" for cg in compare_groups}
     ytitles = {ct: "k" for ct in ch_types}
     _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, left=0.1, top=0.9)
-    plot_group = Group("all", ct)
-    plot_group.plot_save("evoked_cluster_f_test", matplotlib_figure=fig)
+    plot_group = Group(f"all_{plot_language}", ct)
+    plot_group.plot_save("evoked_cluster_f_test", matplotlib_figure=fig, dpi=1000)
     if show_plots:
         plt.show()
     exp = "exp1" if "1" in ct.pr.name else "exp2"
-    latex_path = join(plot_group.figures_path, f"{exp}_evoked_stats.tex")
+    latex_path = join(plot_group.figures_path, f"{exp}_evoked_stats_{plot_language}.tex")
     _save_latex_table(data_df, latex_path,
-                      caption=r"Signifikante Cluster der Cluster--Permutationstests. p--Werte sind Bonferroni--korrigiert.",
+                      caption=lang_dict["caption"],
                       label=f"tab:{exp}_evoked_stats")
 
 
 def ltc_temporal_cluster(
-        ct, compare_groups, group_colors, target_labels, label_alias, label_colors, cluster_trial, n_jobs, show_plots
+        ct, compare_groups, group_colors, target_labels, label_alias, label_colors, cluster_trial, n_jobs, show_plots,
+        plot_language
 ):
     """A 1sample-permutation-cluster-test with clustering in time is performed between the label-time-courses of two stimulus-groups."""
+    lang_dict = {
+        "deutsch": {
+            "xlabel": "Zeit [s]",
+            "ylabel": "Quellen Amplitude",
+            "columns": ["Vergleich", "Kanaltyp", "Zeit", "p-Wert"],
+            "caption": "Signifikante Cluster der Cluster--Permutationstests im Quellen-Raum. p--Werte sind Bonferroni--korrigiert."
+        },
+        "english": {
+            "xlabel": "Time [s]",
+            "ylabel": "Source Amplitude",
+            "columns": ["Comparison", "Channel type", "Time", "p-value"],
+            "caption": "Significant clusters of the cluster-permutation-tests in source-space. p-values are Bonferroni-corrected."
+        }
+    }
+    lang_dict = lang_dict[plot_language]
     nrows = len(target_labels)
     ncols = len(compare_groups)
     fig, axes = plt.subplots(
@@ -1635,7 +1668,7 @@ def ltc_temporal_cluster(
         sharey=True,
         figsize=(ncols * 3, nrows * 2),
     )
-    data_df = pd.DataFrame([], columns=["Vergleich", "Label", "Zeit", "p-Wert"])
+    data_df = pd.DataFrame([], columns=lang_dict["columns"])
     global cluster_counter
     cluster_counter = 1
     bonferroni_factor = nrows * ncols
@@ -1675,6 +1708,7 @@ def ltc_temporal_cluster(
                 n_jobs=n_jobs,
                 group_colors=group_colors,
                 factor=factor,
+                xlabel=lang_dict["xlabel"],
                 ylabel=f"dSPM-Wert [{unit}]",
                 bonferroni_factor=bonferroni_factor,
             )
@@ -1690,19 +1724,19 @@ def ltc_temporal_cluster(
 
     xtitles = {'-'.join(gn): "k" for gn in compare_groups}
     ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
-    xlabel = "Zeit [s]"
-    ylabel = "Quellen Amplitude"
+    xlabel = lang_dict["xlabel"]
+    ylabel = lang_dict["ylabel"]
     _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
 
-    plot_group = Group("all", ct)
-    plot_group.plot_save("ltc_cluster_f_test", matplotlib_figure=fig)
+    plot_group = Group(f"all_{plot_language}", ct)
+    plot_group.plot_save("ltc_cluster_f_test", matplotlib_figure=fig, dpi=1000)
     if show_plots:
         plt.show()
     exp = "exp1" if "1" in ct.pr.name else "exp2"
-    latex_path = join(plot_group.figures_path, f"{exp}_ltc_stats.tex")
+    latex_path = join(plot_group.figures_path, f"{exp}_ltc_stats_{plot_language}.tex")
     _save_latex_table(
         data_df, latex_path,
-        caption="Signifikante Cluster der Cluster--Permutationstests im Quellen-Raum. p--Werte sind Bonferroni--korrigiert.",
+        caption=lang_dict["caption"],
         label=f"tab:{exp}_ltc_stats")
 
 
@@ -2210,7 +2244,8 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups, ch_types,
         if combine_stc:
             all_stcs = []
         stims = []
-        for other_meeg_name in [m for m in meeg.pr.all_meeg if _get_group(meeg.name, combine_groups, meeg.ct) is not None]:
+        for other_meeg_name in [m for m in meeg.pr.all_meeg if
+                                _get_group(meeg.name, combine_groups, meeg.ct) is not None]:
             match = re.match(sub_name + first_pattern, other_meeg_name)
             if match:
                 other_meeg = MEEG(other_meeg_name, meeg.ct)
@@ -2384,7 +2419,9 @@ def plot_rating_combination_test(meeg, combine_groups, show_plots):
         fig, ax = plt.subplots()
         ax.plot(orig_evoked.times, gfp, label=meeg.name)
 
-        other_meegs = [m for m in meeg.pr.all_meeg if re.match(sub_name + first_pattern, m) and m != meeg.name and _get_group(m, combine_groups, meeg.ct) is not None]
+        other_meegs = [m for m in meeg.pr.all_meeg if
+                       re.match(sub_name + first_pattern, m) and m != meeg.name and _get_group(m, combine_groups,
+                                                                                               meeg.ct) is not None]
         other_meegs += [new_high_name, new_low_name]
 
         for other_meeg_name in other_meegs:
@@ -2392,7 +2429,6 @@ def plot_rating_combination_test(meeg, combine_groups, show_plots):
             evoked = other_meeg.load_evokeds()[0]
             gfp = calculate_gfp(evoked)["grad"]
             ax.plot(evoked.times, gfp, label=other_meeg_name)
-
 
         ax.legend()
         plt.tight_layout()

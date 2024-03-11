@@ -30,3 +30,4 @@ ltc_target_dir;;Diss;"""""";;;PathGui;{'pick_mode': 'directory'}
 con_compare_labels;;Diss;[];;;ListGui;
 combine_groups;;Diss;[];;;ListGui;
 label_alias;;Diss;{};;;DictGui;
+plot_language;;Diss;deutsch;;Choose the language for the plot;ComboGui;{'options': ['deutsch', 'english']}
