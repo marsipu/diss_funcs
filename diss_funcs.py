@@ -32,9 +32,31 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 from statannotations.Annotator import Annotator
 
-figsize = [9, 3]
+figwidth = 10
+fontsize = 12
 
-
+lang_dict = {
+    "deutsch": {
+        "xlabel": "Zeit [s]",
+        "volt": "elektrische Spannung",
+        "mag": "Feldstärke",
+        "source": "dSPM",  # "dSPM" is the abbreviation for "dynamic Statistical Parametric Mapping"
+        "columns": ["Vergleich", "Kanaltyp", "Zeit", "p-Wert"],
+        "caption": "Signifikante Cluster der Cluster--Permutationstests. p--Werte sind Bonferroni--korrigiert.",
+    },
+    "english": {
+        "xlabel": "Time [s]",
+        "volt": "Voltage",
+        "mag": "Field strength",
+        "source": "dSPM",  # "dSPM" is the abbreviation for "dynamic Statistical Parametric Mapping"
+        "columns": ["Comparison", "Channel type", "Time", "p-value"],
+        "caption": "Significant clusters of the cluster-permutation-tests. p-values are Bonferroni-corrected.",
+    }
+}
+ch_type_aliases = {
+    "eeg": "EEG",
+    "grad": "MEG",
+}
 ##############################################################
 # Preparation
 ##############################################################
@@ -880,8 +902,8 @@ def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
     x = "Probanden"
     y = "Rating"
     hue = "Stimulation"
-    fs = [figsize[0], figsize[1] * 2]
-    fig, axes = plt.subplots(2, 1, figsize=fs)
+    plt.rcParams.update({"font.size": fontsize})
+    fig, axes = plt.subplots(2, 1, figsize=(figwidth, 6))
     for ax_idx, (title, groups) in enumerate(rating_groups.items()):
         df = pd.DataFrame([], columns=[x, y])
         for group_name in groups:
@@ -904,6 +926,7 @@ def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
 
         sns.boxplot(data=df, x=x, y=y, whis=(1, 99), hue=hue, palette=group_colors, ax=axes[ax_idx])
         axes[ax_idx].set_title(title)
+        axes[ax_idx].legend(loc="upper right")
         axes[ax_idx].label_outer()
 
     Group(ct.pr.name, ct).plot_save("ratings_combined")
@@ -976,183 +999,189 @@ def _get_n_subplots(n_items):
     return nrows, ncols, ax_idxs
 
 
-ch_type_names = {"eeg": "EEG", "grad": "MEG"}
-
-
-def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jobs):
+def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jobs, plot_language):
     """Evokedsa are compared for lower and higher rating."""
-    nrows = len(ch_types)
-    ncols = len(ct.pr.sel_groups)
-    fig, ax = plt.subplots(
-        nrows=nrows,
-        ncols=ncols,
-        sharex=True,
-        sharey="row",
-        figsize=(3 * ncols, 2 * nrows),
-    )
-    data_df = pd.DataFrame([], columns=["Gruppe", "Kanaltyp", "Zeit", "p-Wert"])
-    if nrows == 1:
-        ax = np.asarray([ax])
-    for row_idx, ch_type in enumerate(ch_types):
+    plt.rcParams.update({"font.size": fontsize})
+    for language, lang_values in _get_language(plot_language).items():
+        global cluster_counter
+        cluster_counter = 1
+        nrows = len(ch_types)
+        ncols = len(ct.pr.sel_groups)
+        fig, ax = plt.subplots(
+            nrows=nrows,
+            ncols=ncols,
+            sharex=True,
+            sharey="row",
+            figsize=(figwidth, 2 * nrows),
+        )
+        data_df = pd.DataFrame([], columns=lang_values["columns"])
+        if nrows == 1:
+            ax = np.asarray([ax])
+        for row_idx, ch_type in enumerate(ch_types):
+            for col_idx, group_name in enumerate(ct.pr.sel_groups):
+                group = Group(group_name, ct)
+                gfps = dict()
+                rating_queries = ["Lower_Ratings", "Higher_Ratings"]
+                alphas = {"Lower_Ratings": 0.5, "Higher_Ratings": 1}
+                colors = {rq: group_colors.get(group_name) for rq in rating_queries}
+                # These trials need to be set in queries in the pipeline
+                for query_trial in rating_queries:
+                    gfps[query_trial] = dict()
+                    for evokeds, meeg in group.load_items(
+                            obj_type="MEEG", data_type="evoked"
+                    ):
+                        try:
+                            evoked = [ev for ev in evokeds if ev.comment == query_trial][0]
+                            sfreq = evoked.info["sfreq"]
+                        except IndexError:
+                            raise RuntimeWarning(
+                                f"No evoked found from {meeg.name} for {query_trial}"
+                            )
+                        else:
+                            # Assuming times is the same for all measurements
+                            times = evoked.times
+                            gfp = calculate_gfp(evoked)
+                            gfps[query_trial][meeg.name] = gfp
+                    if ct.pr.name == "Experiment1":
+                        gfps[query_trial] = _merge_measurements(gfps[query_trial])
+                group_data = list()
+                for query_trial in gfps:
+                    query_list = list()
+                    for key, value in gfps[query_trial].items():
+                        query_list.append(value[ch_type])
+                    group_data.append(np.asarray(query_list))
+
+                unit = "V" if ch_type == "eeg" else "T/cm"
+                factor, unit = _convert_units(np.min(group_data), unit)
+
+                cluster_data = _plot_permutation_cluster_test(
+                    group_data,
+                    times,
+                    rating_queries,
+                    one_sample=True,
+                    n_jobs=n_jobs,
+                    ax=ax[row_idx, col_idx],
+                    sfreq=sfreq,
+                    hpass=None,
+                    lpass=30,
+                    factor=factor,
+                    xlabel=lang_values["xlabel"],
+                    ylabel=f"{lang_values['volt']} [{unit}]" if ch_type == "eeg" else f"{lang_values['mag']} [{unit}]",
+                    group_colors=colors,
+                    group_alphas=alphas,
+                    bonferroni_factor=ncols,
+                )
+
+                for cld in cluster_data:
+                    data_dict = {cn: cv for cn, cv in zip(
+                        lang_values["columns"], [
+                            group_name,
+                            ch_type_aliases[ch_type],
+                            f"{cld['start']}-{cld['stop']}",
+                            cld["p_val"]
+                        ])}
+                    data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+
+        ct_alias = {"eeg": "EEG", "grad": "MEG"}
+        xtitles = {g: group_colors[g] for g in ct.pr.sel_groups}
+        ytitles = {ct_alias[ct]: "k" for ct in ch_types}
+        _2d_grid_titles_and_labels(fig, ax, xtitles, ytitles)
+        plot_group = Group(f"all_{language}", ct)
+        plot_group.plot_save("evoked_ratings", matplotlib_figure=fig)
+        exp = "exp1" if "1" in ct.pr.name else "exp2"
+        latex_path = join(plot_group.figures_path, f"{exp}_evoked_rating_stats_{language}.tex")
+        _save_latex_table(
+            data_df, latex_path,
+            caption=lang_values["caption"],
+            label=f"tab:{exp}_evoked_rating_stats")
+
+
+def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, group_colors, show_plots, n_jobs, plot_language):
+    """Evokedsa are compared for lower and higher rating."""
+    plt.rcParams.update({"font.size": fontsize})
+    for language, lang_values in _get_language(plot_language).items():
+        nrows = len(target_labels)
+        ncols = len(ct.pr.sel_groups)
+        fig, axes = plt.subplots(
+            nrows=nrows,
+            ncols=ncols,
+            sharex=True,
+            sharey=True,
+            figsize=(figwidth, nrows * 2),
+        )
+        data_df = pd.DataFrame([], columns=lang_values["columns"])
+        global cluster_counter
+        cluster_counter = 1
+        bonferroni_factor = nrows * ncols
         for col_idx, group_name in enumerate(ct.pr.sel_groups):
             group = Group(group_name, ct)
-            gfps = dict()
-            rating_queries = ["Lower_Ratings", "Higher_Ratings"]
+            ltc_dict = dict()
+            rating_groups = ["Lower_Ratings", "Higher_Ratings"]
             alphas = {"Lower_Ratings": 0.5, "Higher_Ratings": 1}
-            colors = {rq: group_colors.get(group_name) for rq in rating_queries}
             # These trials need to be set in queries in the pipeline
-            for query_trial in rating_queries:
-                gfps[query_trial] = dict()
-                for evokeds, meeg in group.load_items(
-                        obj_type="MEEG", data_type="evoked"
-                ):
-                    try:
-                        evoked = [ev for ev in evokeds if ev.comment == query_trial][0]
-                        sfreq = evoked.info["sfreq"]
-                    except IndexError:
-                        raise RuntimeWarning(
-                            f"No evoked found from {meeg.name} for {query_trial}"
-                        )
-                    else:
-                        # Assuming times is the same for all measurements
-                        times = evoked.times
-                        gfp = calculate_gfp(evoked)
-                        gfps[query_trial][meeg.name] = gfp
-                if ct.pr.name == "Experiment1":
-                    gfps[query_trial] = _merge_measurements(gfps[query_trial])
-            group_data = list()
-            for query_trial in gfps:
-                query_list = list()
-                for key, value in gfps[query_trial].items():
-                    query_list.append(value[ch_type])
-                group_data.append(np.asarray(query_list))
+            for query_trial in rating_groups:
+                ltc_dict[query_trial] = dict()
+                for label in target_labels:
+                    ltc_dict[query_trial][label] = dict()
+                    for ltcs, meeg in group.load_items(
+                            obj_type="MEEG", data_type="ltc"
+                    ):
+                        ltcs = ltcs[query_trial]
+                        times = ltcs[label][1]
+                        ltc_dict[query_trial][label][meeg.name] = ltcs[label][0]
 
-            unit = "V" if ch_type == "eeg" else "Am"
-            factor, unit = _convert_units(np.min(group_data), unit)
+            if ct.pr.name == "Experiment1":
+                for trial in ltc_dict:
+                    for label in ltc_dict[trial]:
+                        ltc_dict[trial][label] = _merge_measurements(ltc_dict[trial][label])
 
-            cluster_data = _plot_permutation_cluster_test(
-                group_data,
-                times,
-                rating_queries,
-                one_sample=True,
-                n_jobs=n_jobs,
-                ax=ax[row_idx, col_idx],
-                sfreq=sfreq,
-                hpass=1,
-                lpass=30,
-                factor=factor,
-                ylabel=f"Spannung [{unit}]" if ch_type == "eeg" else f"Feldstärke [{unit}]",
-                group_colors=colors,
-                group_alphas=alphas,
-                bonferroni_factor=ncols,
-            )
+            for row_idx, label_name in enumerate(target_labels):
+                group_data = list()
+                for query_trial, query_data in ltc_dict.items():
+                    group_data.append(np.asarray(list(query_data[label_name].values())))
 
-            for cld in cluster_data:
-                data_dict = {
-                    "Gruppe": group_name,
-                    "Kanaltyp": ch_type_names[ch_type],
-                    "Zeit": f"{cld['start']}-{cld['stop']}",
-                    "p-Wert": cld["p_val"],
-                }
-                data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+                factor, unit = _convert_units(np.min(group_data), "")
 
-    ct_alias = {"eeg": "EEG", "grad": "MEG"}
-    xtitles = {g: group_colors[g] for g in ct.pr.sel_groups}
-    ytitles = {ct_alias[ct]: "k" for ct in ch_types}
-    _2d_grid_titles_and_labels(fig, ax, xtitles, ytitles)
-    plot_group = Group("all", ct)
-    plot_group.plot_save("evoked_ratings", matplotlib_figure=fig)
-    exp = "exp1" if "1" in ct.pr.name else "exp2"
-    latex_path = join(plot_group.figures_path, f"{exp}_evoked_rating_stats.tex")
-    _save_latex_table(
-        data_df, latex_path,
-        caption="Signifikante Cluster eines 1-sample-cluster-permutations-tests für die GFP von höherem gegen niedrigerem Rating. p--Werte sind Bonferroni--korrigiert.",
-        label=f"tab:{exp}_evoked_rating_stats")
+                cluster_data = _plot_permutation_cluster_test(
+                    group_data,
+                    times,
+                    group_names=rating_groups,
+                    one_sample=True,
+                    ax=axes[row_idx, col_idx],
+                    n_jobs=n_jobs,
+                    group_colors=group_colors,
+                    factor=factor,
+                    ylabel=f"{lang_values['source']} [{unit}]",
+                    bonferroni_factor=bonferroni_factor,
+                    group_alphas=alphas,
+                )
+                _add_label_inset(axes[row_idx, col_idx], label_name, [0.05, 0.7, 0.25, 0.25])
+                for cld in cluster_data:
+                    data_dict = {cn: cv for cn, cv in zip(
+                        lang_values["columns"], [
+                            " - ".join(rating_groups),
+                            label_name,
+                            f"{cld['start']}-{cld['stop']}",
+                            cld["p_val"]
+                        ])}
+                    data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
 
+        xtitles = {g: group_colors[g] for g in ct.pr.sel_groups}
+        ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
+        xlabel = lang_values["xlabel"]
+        ylabel = lang_values["source"]
+        _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
 
-def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, group_colors, show_plots, n_jobs):
-    """Evokedsa are compared for lower and higher rating."""
-    nrows = len(target_labels)
-    ncols = len(ct.pr.sel_groups)
-    fig, axes = plt.subplots(
-        nrows=nrows,
-        ncols=ncols,
-        sharex=True,
-        sharey=True,
-        figsize=(ncols * 3, nrows * 2),
-    )
-    data_df = pd.DataFrame([], columns=["Vergleich", "Label", "Zeit", "p-Wert"])
-    global cluster_counter
-    cluster_counter = 1
-    bonferroni_factor = nrows * ncols
-    for col_idx, group_name in enumerate(ct.pr.sel_groups):
-        group = Group(group_name, ct)
-        ltc_dict = dict()
-        rating_groups = ["Lower_Ratings", "Higher_Ratings"]
-        alphas = {"Lower_Ratings": 0.5, "Higher_Ratings": 1}
-        # These trials need to be set in queries in the pipeline
-        for query_trial in rating_groups:
-            ltc_dict[query_trial] = dict()
-            for label in target_labels:
-                ltc_dict[query_trial][label] = dict()
-                for ltcs, meeg in group.load_items(
-                        obj_type="MEEG", data_type="ltc"
-                ):
-                    ltcs = ltcs[query_trial]
-                    times = ltcs[label][1]
-                    ltc_dict[query_trial][label][meeg.name] = ltcs[label][0]
-
-        if ct.pr.name == "Experiment1":
-            for trial in ltc_dict:
-                for label in ltc_dict[trial]:
-                    ltc_dict[trial][label] = _merge_measurements(ltc_dict[trial][label])
-
-        for row_idx, label_name in enumerate(target_labels):
-            group_data = list()
-            for query_trial, query_data in ltc_dict.items():
-                group_data.append(np.asarray(list(query_data[label_name].values())))
-
-            factor, unit = _convert_units(np.min(group_data), "")
-
-            cluster_data = _plot_permutation_cluster_test(
-                group_data,
-                times,
-                group_names=rating_groups,
-                one_sample=True,
-                ax=axes[row_idx, col_idx],
-                n_jobs=n_jobs,
-                group_colors=group_colors,
-                factor=factor,
-                ylabel=f"dSPM-Wert [{unit}]",
-                bonferroni_factor=bonferroni_factor,
-                group_alphas=alphas,
-            )
-            _add_label_inset(axes[row_idx, col_idx], label_name, [0.05, 0.7, 0.25, 0.25])
-            for cld in cluster_data:
-                data_dict = {
-                    "Vergleich": " - ".join(rating_groups),
-                    "Label": label_name,
-                    "Zeit": f"{cld['start']}-{cld['stop']}",
-                    "p-Wert": cld["p_val"],
-                }
-                data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
-
-    xtitles = {g: group_colors[g] for g in ct.pr.sel_groups}
-    ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
-    xlabel = "Zeit [s]"
-    ylabel = "Quellen Amplitude"
-    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
-
-    plot_group = Group("all", ct)
-    plot_group.plot_save("ltc_ratings", matplotlib_figure=fig)
-    if show_plots:
-        plt.show()
-    exp = "exp1" if "1" in ct.pr.name else "exp2"
-    latex_path = join(plot_group.figures_path, f"{exp}_ltc_rating_stats.tex")
-    _save_latex_table(
-        data_df, latex_path,
-        caption="Signifikante Cluster eines 1-sample-cluster-permutations-tests für die Label-Time-Courses von höherem gegen niedrigerem Rating. p--Werte sind Bonferroni--korrigiert.",
-        label=f"tab:{exp}_ltc_rating_stats")
+        plot_group = Group(f"all_{language}", ct)
+        plot_group.plot_save("ltc_ratings", matplotlib_figure=fig)
+        if show_plots:
+            plt.show()
+        exp = "exp1" if "1" in ct.pr.name else "exp2"
+        latex_path = join(plot_group.figures_path, f"{exp}_ltc_rating_stats_{language}.tex")
+        _save_latex_table(
+            data_df, latex_path,
+            caption=lang_values["caption"],
+            label=f"tab:{exp}_ltc_rating_stats")
 
 
 def plot_load_cell_group_ave(
@@ -1166,10 +1195,7 @@ def plot_load_cell_group_ave(
 ):
     """The Load-Cell-Signal is plotted for all groups and subjects."""
     groups = [g for g in ct.pr.sel_groups if "Laser" not in g]
-    fs = [figsize[0], figsize[1] * len(groups)]
-    fig, ax = plt.subplots(len(groups), 1, sharey=False, sharex=True, figsize=fs)
-    if not isinstance(ax, np.ndarray):
-        ax = [ax]
+    fig, ax = plt.subplots(1, 1, sharey=False, sharex=True, figsize=(figwidth, 6))
 
     for idx, group_name in enumerate(groups):
         group = Group(group_name, ct)
@@ -1185,22 +1211,22 @@ def plot_load_cell_group_ave(
             epo_data = list()
             for epd in epochs_dict["Down"]:
                 epo_data.append(epd)
-                ax[idx].plot(
-                    times, epd, color=group_colors.get(group_name, "k"), alpha=0.5
+                ax.plot(
+                    times, epd, color=group_colors.get(group_name, "k"), alpha=0.1, label=group_name,
                 )
-            epo_mean = np.mean(epo_data, axis=0)
-            ax[idx].plot(
-                times, epo_mean, color=group_colors.get(group_name, "k"), alpha=1
-            )
-            half_idx = int(len(epd) / 2) + 1
-            ax[idx].plot(0, epd[half_idx], "xr")
-
-        ax[idx].set_title(group_name)
-        ax[idx].set_ylabel("Weight")
-        if idx == len(ct.pr.sel_groups) - 1:
-            ax[idx].set_xlabel("Zeit [s]")
-
-    fig.suptitle("Load-Cell Data")
+    handles, labels = ax.get_legend_handles_labels()
+    newLabels, newHandles = [], []
+    for handle, label in zip(handles, labels):
+      if label not in newLabels:
+        newLabels.append(label)
+        newHandles.append(handle)
+    legend = ax.legend(newHandles, newLabels, loc="upper right")
+    for lh in legend.legendHandles:
+        lh.set_alpha(1)
+    ax.set_ylabel("Spannung [V]")
+    ax.set_xlabel("Zeit [s]")
+    ax.set_title("Wägezellen-Signal")
+    plt.tight_layout()
     Group(ct.pr.name, ct).plot_save("lc_trigger_all", matplotlib_figure=fig)
 
     if show_plots:
@@ -1253,109 +1279,112 @@ def _tick_formatter(x, pos, factor):
     return str(round(x * factor, 3))
 
 
-def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots):
+def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots, plot_language):
     """The GFP of all groups is compared."""
-    fs = [figsize[0], figsize[1] * len(ch_types)]
-    fig, axes = plt.subplots(
-        nrows=len(ch_types),
-        ncols=1,
-        sharex=True,
-        sharey=False,
-        figsize=fs,
-    )
-    if not isinstance(axes, np.ndarray):
-        axes = [axes]
-    for ax_idx, ch_type in enumerate(ch_types):
-        min_val = 1
-        for group_name in ct.pr.sel_groups:
-            group = Group(group_name, ct)
-            gfps = list()
-            for evokeds, meeg in group.load_items(data_type="evoked"):
-                evoked = evokeds[0]
-                # Assumes times is everywhere the same
-                times = evoked.times
-                gfp = calculate_gfp(evoked)[ch_type]
-                # Apply bandpass filter 1-30 Hz
-                gfp = mne.filter.filter_data(gfp, 1000, None, 30)
-                gfps.append(gfp)
-            y = np.mean(gfps, axis=0),
-            this_min = np.min(y)
-            min_val = np.min([min_val, this_min])
-            axes[ax_idx].plot(
-                times,
-                y[0],
-                label=group.name,
-                color=group_colors.get(group_name, "k"),
-            )
-        unit = "V" if ch_type == "eeg" else "Am"
-        factor, unit = _convert_units(min_val, unit)
-        axes[ax_idx].yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
-        axes[ax_idx].set_title(ch_type_names[ch_type])
-        axes[ax_idx].set_xlabel("Zeit [s]")
-        axes[ax_idx].set_ylabel(
-            f"elektrische Spannung [{unit}]" if ch_type == "eeg" else f"Magnetfeldstärke [{unit}]"
+    plt.rcParams.update({"font.size": fontsize})
+    for language, lang_values in _get_language(plot_language).items():
+        fs = [figwidth, 3 * len(ch_types)]
+        fig, axes = plt.subplots(
+            nrows=len(ch_types),
+            ncols=1,
+            sharex=True,
+            sharey=False,
+            figsize=fs,
         )
-        axes[ax_idx].legend(loc="upper right", fontsize="small")
-    plt.tight_layout()
-    if show_plots:
-        plt.show()
-    Group("all", ct).plot_save("gfp_combined")
+        if not isinstance(axes, np.ndarray):
+            axes = [axes]
+        for ax_idx, ch_type in enumerate(ch_types):
+            min_val = 1
+            for group_name in ct.pr.sel_groups:
+                group = Group(group_name, ct)
+                gfps = list()
+                for evokeds, meeg in group.load_items(data_type="evoked"):
+                    evoked = evokeds[0]
+                    # Assumes times is everywhere the same
+                    times = evoked.times
+                    gfp = calculate_gfp(evoked)[ch_type]
+                    # Apply lowpass filter 30 Hz
+                    gfp = mne.filter.filter_data(gfp, 1000, None, 30)
+                    gfps.append(gfp)
+                y = np.mean(gfps, axis=0),
+                this_min = np.min(y)
+                min_val = np.min([min_val, this_min])
+                axes[ax_idx].plot(
+                    times,
+                    y[0],
+                    label=group.name,
+                    color=group_colors.get(group_name, "k"),
+                )
+            unit = "V" if ch_type == "eeg" else "T/cm"
+            factor, unit = _convert_units(min_val, unit)
+            axes[ax_idx].yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
+            axes[ax_idx].set_title(ch_type_aliases[ch_type])
+            axes[ax_idx].set_xlabel(lang_values["xlabel"])
+            axes[ax_idx].set_ylabel(f"{lang_values['volt']} [{unit}]" if ch_type == "eeg" else f"{lang_values['mag']} [{unit}]"
+            )
+            axes[ax_idx].legend(loc="upper right", fontsize="small")
+        plt.tight_layout()
+        if show_plots:
+            plt.show()
+        Group(f"all_{language}", ct).plot_save(f"gfp_combined")
 
 
 def _add_label_inset(ax, label_name, bounds):
     img_path = join(Path(__file__).parent, f"{label_name}.png")
     if isfile(img_path):
         image = plt.imread(img_path)
-        axin = ax.inset_axes(bounds)
+        axin = ax.inset_axes(bounds, zorder=0)
         axin.imshow(image)
         axin.axis("off")
     else:
         print(f"Image for {label_name} not found.")
 
 
-def plot_ltc_group_stacked(ct, group_colors, target_labels, label_colors, label_alias, show_plots, save_plots):
+def plot_ltc_group_stacked(ct, group_colors, target_labels, label_colors, label_alias, show_plots, save_plots, plot_language):
     """The label-time-course of all groups is compared."""
-    nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
-    fs = [figsize[0], figsize[1] * nrows]
-    fig, axes = plt.subplots(
-        nrows=nrows,
-        ncols=ncols,
-        sharex=True,
-        sharey=True,
-        figsize=fs,
-    )
-    ax_idxs = list(ax_idxs)
-    min_val = 1
-    for group_name in ct.pr.sel_groups:
-        group = Group(group_name, ct)
-        ltcs = group.load_ga_ltc()
-        # Always take the first trial
-        ltcs = ltcs[list(ltcs.keys())[0]]
-        for ax_idx, label_name in zip(ax_idxs, target_labels):
-            ltc = ltcs[label_name]
-            # Apply bandpass filter 1-30 Hz
-            ltc_data = mne.filter.filter_data(ltc[0], 1000, None, 30)
-            min_val = np.min([min_val, np.min(ltc_data)])
-            times = ltc[1]
-            axes[ax_idx].plot(
-                times,
-                ltc_data,
-                label=group.name,
-                color=group_colors.get(group_name, "k"),
-            )
-            _add_label_inset(axes[ax_idx], label_name, [0, 0.65, 0.3, 0.3])
-            axes[ax_idx].set_title(label_alias[label_name], color=label_colors[label_name])
-    factor, unit = _convert_units(min_val, "")
-    for ax in axes.flat:
-        ax.yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
-        ax.set_xlabel("Zeit (s)")
-        ax.set_ylabel(f"Quellen Amplitude")
-        ax.legend(loc="upper right", fontsize="small")
-        ax.label_outer()
-    plt.tight_layout()
-    if show_plots:
-        plt.show()
-    Group("all", ct).plot_save("ltc_combined")
+    plt.rcParams.update({"font.size": fontsize})
+    for language, lang_values in _get_language(plot_language).items():
+        nrows, ncols, ax_idxs = _get_n_subplots(len(target_labels))
+
+        fig, axes = plt.subplots(
+            nrows=nrows,
+            ncols=ncols,
+            sharex=True,
+            sharey=True,
+            figsize=(figwidth, 3 * nrows),
+        )
+        ax_idxs = list(ax_idxs)
+        min_val = 1
+        for group_name in ct.pr.sel_groups:
+            group = Group(group_name, ct)
+            ltcs = group.load_ga_ltc()
+            # Always take the first trial
+            ltcs = ltcs[list(ltcs.keys())[0]]
+            for ax_idx, label_name in zip(ax_idxs, target_labels):
+                ltc = ltcs[label_name]
+                # Apply lowpass filter 30 Hz
+                ltc_data = mne.filter.filter_data(ltc[0], 1000, None, 30)
+                min_val = np.min([min_val, np.min(ltc_data)])
+                times = ltc[1]
+                axes[ax_idx].plot(
+                    times,
+                    ltc_data,
+                    label=group.name,
+                    color=group_colors.get(group_name, "k"),
+                )
+                _add_label_inset(axes[ax_idx], label_name, [0, 0.65, 0.3, 0.3])
+                axes[ax_idx].set_title(label_alias[label_name], color=label_colors[label_name])
+        factor, unit = _convert_units(min_val, "")
+        for ax in axes.flat:
+            ax.yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
+            ax.set_xlabel(lang_values["xlabel"])
+            ax.set_ylabel(lang_values['source'])
+            ax.legend(loc="upper right", fontsize="small")
+            ax.label_outer()
+        plt.tight_layout()
+        if show_plots:
+            plt.show()
+        Group(f"all_{language}", ct).plot_save("ltc_combined")
 
 
 ##############################################################
@@ -1379,14 +1408,12 @@ def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel=None, ylabel=
     for ax, (title, color) in zip(axes[0], xtitles.items()):
         ax.annotate(title, xy=(0.5, 1), xytext=(0, pad),
                     xycoords='axes fraction', textcoords='offset points',
-                    ha='center', va='baseline', color=color,
-                    fontsize=10)
+                    ha='center', va='baseline', color=color)
 
     for ax, (title, color) in zip(axes[:, 0], ytitles.items()):
         ax.annotate(title, xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
                     xycoords=ax.yaxis.label, textcoords='offset points',
-                    ha='right', va='center', color=color,
-                    rotation=90, fontsize=10)
+                    ha='right', va='center', color=color, rotation=90)
 
     if xlabel is not None:
         for ax in axes[-1, :]:
@@ -1452,7 +1479,7 @@ def _plot_permutation_cluster_test(
     )
     # Plot
     if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
+        fig, ax = plt.subplots(figsize=(figwidth, 2))
     for data, group_name in zip(group_data, group_names):
         color = group_colors.get(group_name, None)
         alpha = group_alphas.get(group_name, 1)
@@ -1490,7 +1517,6 @@ def _plot_permutation_cluster_test(
                 f"{cluster_counter}",
                 horizontalalignment="center",
                 verticalalignment="center",
-                fontsize="small",
                 transform=ax.get_xaxis_transform(),
             )
             cluster_dict = {
@@ -1538,206 +1564,185 @@ def _save_latex_table(data_df, latex_path, caption, label):
                 index_names=True
             )
 
+def _get_language(language):
+    if language == "all":
+        language_list = list(lang_dict.keys())
+    else:
+        language_list = [language]
+    plot_language = {lang: lang_dict[lang] for lang in language_list}
+    return plot_language
 
 def evoked_temporal_cluster(
         ct, ch_types, group_colors, compare_groups, cluster_trial, n_jobs, show_plots, plot_language,
 ):
     """A 1sample-permutation-cluster-test with clustering in time is performed between the evoked of two stimulus-groups."""
-    lang_dict = {
-        "deutsch": {
-            "xlabel": "Zeit [s]",
-            "volt": "elektrische Spannung",
-            "mag": "Feldstärke",
-            "columns": ["Vergleich", "Kanaltyp", "Zeit", "p-Wert"],
-            "caption": "Signifikante Cluster der Cluster--Permutationstests. p--Werte sind Bonferroni--korrigiert.",
-        },
-        "english": {
-            "xlabel": "Time [s]",
-            "volt": "Voltage",
-            "mag": "Field strength",
-            "columns": ["Comparison", "Channel type", "Time", "p-value"],
-            "caption": "Significant clusters of the cluster-permutation-tests. p-values are Bonferroni-corrected.",
-        }
-    }
-    lang_dict = lang_dict[plot_language]
+    plt.rcParams.update({"font.size": fontsize})
+    for language, lang_values in _get_language(plot_language).items():
+        nrows = len(ch_types)
+        ncols = len(compare_groups)
+        fig, axes = plt.subplots(
+            nrows=nrows,
+            ncols=ncols,
+            sharex=True,
+            sharey="row",
+            figsize=(figwidth, 2 * nrows),
 
-    nrows = len(ch_types)
-    ncols = len(compare_groups)
-    fig, axes = plt.subplots(
-        nrows=nrows,
-        ncols=ncols,
-        sharex=True,
-        sharey="row",
-        figsize=(3 * ncols, 2.5 * nrows),
+        )
+        data_df = pd.DataFrame([], columns=lang_values["columns"])
+        if nrows == 1:
+            axes = np.asarray([axes])
+        global cluster_counter
+        cluster_counter = 1
+        bonferroni_factor = nrows * ncols
+        for col_idx, group_names in enumerate(compare_groups):
+            for row_idx, ch_type in enumerate(ch_types):
+                group_data = list()
+                for group_name in group_names:
+                    group = Group(group_name, ct)
+                    trial = cluster_trial.get(group_name)
+                    datas = dict()
+                    for evokeds, meeg in group.load_items(
+                            obj_type="MEEG", data_type="evoked"
+                    ):
+                        try:
+                            evoked = [ev for ev in evokeds if ev.comment == trial][0]
+                        except IndexError:
+                            print(f"No evoked for {trial} in {meeg.name}")
+                        else:
+                            times = evoked.times
+                            gfp = calculate_gfp(evoked)[ch_type]
+                            datas[meeg.name] = gfp
+                    if ct.pr.name == "Experiment1":
+                        datas = _merge_measurements(datas)
+                    group_data.append(np.asarray(list(datas.values())))
 
-    )
-    data_df = pd.DataFrame([], columns=lang_dict["columns"])
-    if nrows == 1:
-        axes = np.asarray([axes])
-    global cluster_counter
-    cluster_counter = 1
-    bonferroni_factor = nrows * ncols
-    for col_idx, group_names in enumerate(compare_groups):
-        for row_idx, ch_type in enumerate(ch_types):
-            group_data = list()
-            for group_name in group_names:
-                group = Group(group_name, ct)
-                trial = cluster_trial.get(group_name)
-                datas = dict()
-                for evokeds, meeg in group.load_items(
-                        obj_type="MEEG", data_type="evoked"
-                ):
-                    try:
-                        evoked = [ev for ev in evokeds if ev.comment == trial][0]
-                    except IndexError:
-                        print(f"No evoked for {trial} in {meeg.name}")
-                    else:
-                        times = evoked.times
-                        gfp = calculate_gfp(evoked)[ch_type]
-                        # Apply bandpass filter 1-30 Hz
-                        gfp = mne.filter.filter_data(gfp, 1000, None, 30)
-                        datas[meeg.name] = gfp
-                if ct.pr.name == "Experiment1":
-                    datas = _merge_measurements(datas)
-                group_data.append(np.asarray(list(datas.values())))
+                unit = "V" if ch_type == "eeg" else "T/cm"
+                factor, unit = _convert_units(np.min(group_data), unit)
 
-            unit = "V" if ch_type == "eeg" else "T/cm"
-            factor, unit = _convert_units(np.min(group_data), unit)
-
-            cluster_data = _plot_permutation_cluster_test(
-                group_data,
-                times,
-                group_names,
-                one_sample=True,
-                n_jobs=n_jobs,
-                group_colors=group_colors,
-                ax=axes[row_idx, col_idx],
-                factor=factor,
-                xlabel=lang_dict["xlabel"],
-                ylabel=f"{lang_dict['volt']} [{unit}]" if ch_type == "eeg" else f"{lang_dict['mag']} [{unit}]",
-                bonferroni_factor=bonferroni_factor
-            )
-            for cld in cluster_data:
-                data_dict = {
-                    "Vergleich": " - ".join(group_names),
-                    "Kanaltyp": ch_type,
-                    "Zeit": f"{cld['start']}-{cld['stop']}",
-                    "p-Wert": cld["p_val"],
-                }
-                data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
-    xtitles = {"-".join(cg): "k" for cg in compare_groups}
-    ytitles = {ct: "k" for ct in ch_types}
-    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, left=0.1, top=0.9)
-    plot_group = Group(f"all_{plot_language}", ct)
-    plot_group.plot_save("evoked_cluster_f_test", matplotlib_figure=fig, dpi=1000)
-    if show_plots:
-        plt.show()
-    exp = "exp1" if "1" in ct.pr.name else "exp2"
-    latex_path = join(plot_group.figures_path, f"{exp}_evoked_stats_{plot_language}.tex")
-    _save_latex_table(data_df, latex_path,
-                      caption=lang_dict["caption"],
-                      label=f"tab:{exp}_evoked_stats")
+                cluster_data = _plot_permutation_cluster_test(
+                    group_data,
+                    times,
+                    group_names,
+                    one_sample=True,
+                    n_jobs=n_jobs,
+                    group_colors=group_colors,
+                    ax=axes[row_idx, col_idx],
+                    hpass=None,
+                    lpass=30,
+                    factor=factor,
+                    xlabel=lang_values["xlabel"],
+                    ylabel=f"{lang_values['volt']} [{unit}]" if ch_type == "eeg" else f"{lang_values['mag']} [{unit}]",
+                    bonferroni_factor=bonferroni_factor
+                )
+                for cld in cluster_data:
+                    data_dict = {cn: cv for cn, cv in zip(
+                        lang_values["columns"], [
+                            " - ".join(group_names),
+                            ch_type_aliases[ch_type],
+                            f"{cld['start']}-{cld['stop']}",
+                            cld["p_val"]
+                        ])}
+                    data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+        xtitles = {"-".join(cg): "k" for cg in compare_groups}
+        ytitles = {ch_type_aliases[ct]: "k" for ct in ch_types}
+        _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, left=0.1, top=0.9)
+        plot_group = Group(f"all_{language}", ct)
+        plot_group.plot_save("evoked_cluster_f_test", matplotlib_figure=fig, dpi=1000)
+        if show_plots:
+            plt.show()
+        exp = "exp1" if "1" in ct.pr.name else "exp2"
+        latex_path = join(plot_group.figures_path, f"{exp}_evoked_stats_{language}.tex")
+        _save_latex_table(data_df, latex_path,
+                          caption=lang_values["caption"],
+                          label=f"tab:{exp}_evoked_stats")
 
 
 def ltc_temporal_cluster(
         ct, compare_groups, group_colors, target_labels, label_alias, label_colors, cluster_trial, n_jobs, show_plots,
         plot_language
 ):
-    """A 1sample-permutation-cluster-test with clustering in time is performed between the label-time-courses of two stimulus-groups."""
-    lang_dict = {
-        "deutsch": {
-            "xlabel": "Zeit [s]",
-            "ylabel": "Quellen Amplitude",
-            "columns": ["Vergleich", "Kanaltyp", "Zeit", "p-Wert"],
-            "caption": "Signifikante Cluster der Cluster--Permutationstests im Quellen-Raum. p--Werte sind Bonferroni--korrigiert."
-        },
-        "english": {
-            "xlabel": "Time [s]",
-            "ylabel": "Source Amplitude",
-            "columns": ["Comparison", "Channel type", "Time", "p-value"],
-            "caption": "Significant clusters of the cluster-permutation-tests in source-space. p-values are Bonferroni-corrected."
-        }
-    }
-    lang_dict = lang_dict[plot_language]
-    nrows = len(target_labels)
-    ncols = len(compare_groups)
-    fig, axes = plt.subplots(
-        nrows=nrows,
-        ncols=ncols,
-        sharex=True,
-        sharey=True,
-        figsize=(ncols * 3, nrows * 2),
-    )
-    data_df = pd.DataFrame([], columns=lang_dict["columns"])
-    global cluster_counter
-    cluster_counter = 1
-    bonferroni_factor = nrows * ncols
-    for col_idx, group_names in enumerate(compare_groups):
-        label_X = list()
-        for group_name in group_names:
-            group = Group(group_name, ct)
-            trial = cluster_trial[group_name]
-            datas = {lb_name: dict() for lb_name in target_labels}
-            for ltcs, meeg in group.load_items(obj_type="MEEG", data_type="ltc"):
-                ltcs = ltcs[trial]
-                for label_name, ltc in ltcs.items():
-                    # Assumes times is everywhere the same
-                    times = ltc[1]
-                    # Apply bandpass filter 1-30 Hz
-                    ltc_data = mne.filter.filter_data(ltc[0], 1000, None, 30)
-                    datas[label_name][meeg.name] = ltc_data
-            if ct.pr.name == "Experiment1":
-                for label_name, data in datas.items():
-                    datas[label_name] = _merge_measurements(data)
-            label_X.append(datas)
+    plt.rcParams.update({"font.size": fontsize})
+    for language, lang_values in _get_language(plot_language).items():
+        nrows = len(target_labels)
+        ncols = len(compare_groups)
+        fig, axes = plt.subplots(
+            nrows=nrows,
+            ncols=ncols,
+            sharex=True,
+            sharey=True,
+            figsize=(figwidth, 2 * nrows),
+        )
+        data_df = pd.DataFrame([], columns=lang_values["columns"])
+        global cluster_counter
+        cluster_counter = 1
+        bonferroni_factor = nrows * ncols
+        for col_idx, group_names in enumerate(compare_groups):
+            label_X = list()
+            for group_name in group_names:
+                group = Group(group_name, ct)
+                trial = cluster_trial[group_name]
+                datas = {lb_name: dict() for lb_name in target_labels}
+                for ltcs, meeg in group.load_items(obj_type="MEEG", data_type="ltc"):
+                    ltcs = ltcs[trial]
+                    for label_name, ltc in ltcs.items():
+                        # Assumes times is everywhere the same
+                        times = ltc[1]
+                        datas[label_name][meeg.name] = ltc[0]
+                if ct.pr.name == "Experiment1":
+                    for label_name, data in datas.items():
+                        datas[label_name] = _merge_measurements(data)
+                label_X.append(datas)
 
-        for row_idx, label_name in enumerate(target_labels):
-            group_data = list()
-            for data in label_X:
-                label_data = data[label_name]
-                group_data.append(np.asarray(list(label_data.values())))
+            for row_idx, label_name in enumerate(target_labels):
+                group_data = list()
+                for data in label_X:
+                    label_data = data[label_name]
+                    group_data.append(np.asarray(list(label_data.values())))
 
-            factor, unit = _convert_units(np.min(group_data), "")
+                factor, unit = _convert_units(np.min(group_data), "")
 
-            cluster_data = _plot_permutation_cluster_test(
-                group_data,
-                times,
-                group_names,
-                one_sample=True,
-                ax=axes[row_idx, col_idx],
-                n_jobs=n_jobs,
-                group_colors=group_colors,
-                factor=factor,
-                xlabel=lang_dict["xlabel"],
-                ylabel=f"dSPM-Wert [{unit}]",
-                bonferroni_factor=bonferroni_factor,
-            )
-            _add_label_inset(axes[row_idx, col_idx], label_name, [0.05, 0.7, 0.25, 0.25])
-            for cld in cluster_data:
-                data_dict = {
-                    "Vergleich": " - ".join(group_names),
-                    "Label": label_name,
-                    "Zeit": f"{cld['start']}-{cld['stop']}",
-                    "p-Wert": cld["p_val"],
-                }
-                data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+                cluster_data = _plot_permutation_cluster_test(
+                    group_data,
+                    times,
+                    group_names,
+                    one_sample=True,
+                    ax=axes[row_idx, col_idx],
+                    n_jobs=n_jobs,
+                    group_colors=group_colors,
+                    hpass=None,
+                    lpass=30,
+                    factor=factor,
+                    xlabel=lang_values["xlabel"],
+                    ylabel=f"{lang_values['source']} [{unit}]",
+                    bonferroni_factor=bonferroni_factor,
+                )
+                _add_label_inset(axes[row_idx, col_idx], label_name, [0.05, 0.7, 0.25, 0.25])
+                for cld in cluster_data:
+                    data_dict = {cn: cv for cn, cv in zip(
+                        lang_values["columns"], [
+                            " - ".join(group_names),
+                            label_name,
+                            f"{cld['start']}-{cld['stop']}",
+                            cld["p_val"]
+                        ])}
+                    data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
 
-    xtitles = {'-'.join(gn): "k" for gn in compare_groups}
-    ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
-    xlabel = lang_dict["xlabel"]
-    ylabel = lang_dict["ylabel"]
-    _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
+        xtitles = {'-'.join(gn): "k" for gn in compare_groups}
+        ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
+        xlabel = lang_values["xlabel"]
+        ylabel = lang_values["source"]
+        _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel)
 
-    plot_group = Group(f"all_{plot_language}", ct)
-    plot_group.plot_save("ltc_cluster_f_test", matplotlib_figure=fig, dpi=1000)
-    if show_plots:
-        plt.show()
-    exp = "exp1" if "1" in ct.pr.name else "exp2"
-    latex_path = join(plot_group.figures_path, f"{exp}_ltc_stats_{plot_language}.tex")
-    _save_latex_table(
-        data_df, latex_path,
-        caption=lang_dict["caption"],
-        label=f"tab:{exp}_ltc_stats")
+        plot_group = Group(f"all_{language}", ct)
+        plot_group.plot_save("ltc_cluster_f_test", matplotlib_figure=fig, dpi=1000)
+        if show_plots:
+            plt.show()
+        exp = "exp1" if "1" in ct.pr.name else "exp2"
+        latex_path = join(plot_group.figures_path, f"{exp}_ltc_stats_{language}.tex")
+        _save_latex_table(
+            data_df, latex_path,
+            caption=lang_values["caption"],
+            label=f"tab:{exp}_ltc_stats")
 
 
 def label_power(
@@ -1784,7 +1789,8 @@ def plot_label_power(ct, tfr_freqs, target_labels, label_alias, label_colors, gr
     tfr_dict = dict()
     nrows = len(target_labels)
     ncols = len(ct.pr.sel_groups)
-    fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True, figsize=(ncols * 1.2, nrows * 1.2),
+    plt.rcParams.update({"font.size": fontsize})
+    fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True, figsize=(ncols * 2.5, nrows * 2.5),
                              layout="constrained")
     im = None
     for col_idx, group_name in enumerate(ct.pr.sel_groups):
@@ -1843,8 +1849,9 @@ def label_power_cond_permclust(
     """As in Compute power and phase lock in label of the source space."""
     nrows = len(target_labels)
     ncols = len(compare_groups)
+    plt.rcParams.update({"font.size": fontsize})
     fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols, sharex=True, sharey=True, figsize=(1.2 * ncols, 1.2 * nrows), layout="constrained"
+        nrows=nrows, ncols=ncols, sharex=True, sharey=True, figsize=(2.5 * ncols, 2.5 * nrows), layout="constrained"
     )
     ims = list()
     diff_avgs = list()
@@ -2008,9 +2015,9 @@ def connectivity_geodesic_statistics(
     freq_pairs = list(zip(con_fmin, con_fmax))
     x = "Vergleichsgruppen"
     y = "Geodätische Distanz"
-    fs = (9, 4 * len(freq_pairs))
+    plt.rcParams.update({"font.size": fontsize})
     fig, axes = plt.subplots(
-        nrows=len(freq_pairs), sharex=True, sharey=True, figsize=fs
+        nrows=len(freq_pairs), sharex=True, sharey=True, figsize=(figwidth, 4 * len(freq_pairs))
     )
     if not isinstance(axes, np.ndarray):
         axes = [axes]
@@ -2374,8 +2381,7 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups, ch_types,
 
 
 def plot_rating_share(ct, combine_groups, group_colors, show_plots):
-    fs = [figsize[0], figsize[1] * 2]
-    fig, ax = plt.subplots(2, 1, figsize=fs)
+    fig, ax = plt.subplots(2, 1, figsize=(figwidth, 6))
     for ax_idx, rat_group in enumerate(["HighR", "LowR"]):
         group = Group(rat_group, ct)
         bottom = np.zeros(len(group.group_list))
@@ -2396,7 +2402,8 @@ def plot_rating_share(ct, combine_groups, group_colors, show_plots):
         ax[ax_idx].set_title(rat_group)
         ax[ax_idx].set_ylabel("Anzahl der Stimuli")
         ax[ax_idx].set_xlabel("Proband")
-        ax[ax_idx].legend()
+        ax[ax_idx].legend(loc="upper right")
+        ax[ax_idx].label_outer()
 
     plt.tight_layout()
 
@@ -2444,7 +2451,7 @@ def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
         "Insula-post-lh": "Ins. post.",
     }
     ncols = len(ct.pr.sel_groups) // 2
-    fig, axes = plt.subplots(2, ncols, figsize=(ncols * 3, 2 * 3), facecolor="black",
+    fig, axes = plt.subplots(2, ncols, figsize=(ncols * 3, 2 * 3), facecolor="white",
                              subplot_kw={'projection': 'polar'})
     axes = axes.flatten()
     datas = dict()
@@ -2473,11 +2480,14 @@ def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
             ax=axes[idx],
             title=group_name,
             fontsize_names=11,
-            fontsize_title=14,
+            fontsize_title=12,
             colorbar_pos=(-0.3, 0.2),
             padding=0,
             vmin=vmin,
-            vmax=vmax
+            vmax=vmax,
+            facecolor="white",
+            textcolor="black",
+            colormap="plasma"
         )
     fig.tight_layout()
     fig.show()
