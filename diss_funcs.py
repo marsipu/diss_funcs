@@ -30,10 +30,9 @@ from scipy.signal import find_peaks, savgol_filter
 from scipy.stats import ttest_1samp
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
-from statannotations.Annotator import Annotator
 
 figwidth = 10
-fontsize = 12
+fontsize = 11
 
 lang_dict = {
     "deutsch": {
@@ -1085,9 +1084,11 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
         ct_alias = {"eeg": "EEG", "grad": "MEG"}
         xtitles = {g: group_colors[g] for g in ct.pr.sel_groups}
         ytitles = {ct_alias[ct]: "k" for ct in ch_types}
-        _2d_grid_titles_and_labels(fig, ax, xtitles, ytitles)
+        _2d_grid_titles_and_labels(fig, ax, xtitles, ytitles, left=0.1, top=0.85)
         plot_group = Group(f"all_{language}", ct)
         plot_group.plot_save("evoked_ratings", matplotlib_figure=fig)
+        if show_plots:
+            plt.show()
         exp = "exp1" if "1" in ct.pr.name else "exp2"
         latex_path = join(plot_group.figures_path, f"{exp}_evoked_rating_stats_{language}.tex")
         _save_latex_table(
@@ -1645,7 +1646,7 @@ def evoked_temporal_cluster(
                     data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
         xtitles = {"-".join(cg): "k" for cg in compare_groups}
         ytitles = {ch_type_aliases[ct]: "k" for ct in ch_types}
-        _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, left=0.1, top=0.9)
+        _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, left=0.1, top=0.85)
         plot_group = Group(f"all_{language}", ct)
         plot_group.plot_save("evoked_cluster_f_test", matplotlib_figure=fig, dpi=1000)
         if show_plots:
@@ -2006,6 +2007,7 @@ def connectivity_geodesic_statistics(
 ):
     """This computes the geodesic distance between connectivity matrices of two groups,
     calculates a 1sample-t-test and plots the results."""
+    from statannotations.Annotator import Annotator
     p_value = 0.05
     if not isinstance(con_fmin, list):
         con_fmin = [con_fmin]
