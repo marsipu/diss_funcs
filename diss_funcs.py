@@ -37,7 +37,7 @@ fontsize = 11
 lang_dict = {
     "deutsch": {
         "xlabel": "Zeit [s]",
-        "volt": "elektrische Spannung",
+        "volt": "Spannung",
         "mag": "Feldstärke",
         "source": "dSPM",  # "dSPM" is the abbreviation for "dynamic Statistical Parametric Mapping"
         "columns": ["Vergleich", "Kanaltyp", "Zeit", "p-Wert"],
@@ -1056,7 +1056,7 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
                 cluster_data = _plot_permutation_cluster_test(
                     group_data,
                     times,
-                    rating_queries,
+                    ["Lower", "Higher"],
                     one_sample=True,
                     n_jobs=n_jobs,
                     ax=ax[row_idx, col_idx],
@@ -1146,7 +1146,7 @@ def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, g
                 cluster_data = _plot_permutation_cluster_test(
                     group_data,
                     times,
-                    group_names=rating_groups,
+                    group_names=["Lower", "Higher"],
                     one_sample=True,
                     ax=axes[row_idx, col_idx],
                     n_jobs=n_jobs,
