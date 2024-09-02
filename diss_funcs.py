@@ -16,7 +16,11 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 from matplotlib.pyplot import colormaps
 from matplotlib.ticker import FuncFormatter
-from mne.minimum_norm import source_induced_power, apply_inverse_epochs
+from mne.minimum_norm import (
+    source_induced_power,
+    apply_inverse_epochs,
+    make_inverse_resolution_matrix,
+)
 from mne.stats import (
     permutation_cluster_test,
     permutation_cluster_1samp_test,
@@ -24,7 +28,12 @@ from mne.stats import (
 )
 from mne.viz import circular_layout
 from mne_connectivity.viz import plot_connectivity_circle
-from mne_pipeline_hd.functions.operations import calculate_gfp, find_6ch_binary_events, epoch_raw, apply_ica
+from mne_pipeline_hd.functions.operations import (
+    calculate_gfp,
+    find_6ch_binary_events,
+    epoch_raw,
+    apply_ica,
+)
 from mne_pipeline_hd.pipeline.loading import MEEG, Group, FSMRI
 from scipy.signal import find_peaks, savgol_filter
 from scipy.stats import ttest_1samp
@@ -50,7 +59,7 @@ lang_dict = {
         "source": "dSPM",  # "dSPM" is the abbreviation for "dynamic Statistical Parametric Mapping"
         "columns": ["Comparison", "Channel type", "Time", "p-value"],
         "caption": "Significant clusters of the cluster-permutation-tests. p-values are Bonferroni-corrected.",
-    }
+    },
 }
 ch_type_aliases = {
     "eeg": "EEG",
@@ -308,7 +317,7 @@ def _add_events_meta(epochs, meta_pd, meta_key):
     meta_pd_filtered = meta_pd.loc[
         meta_pd["id"].isin(epochs.event_id.values())
         & meta_pd["time"].isin(epochs.events[:, 0])
-        ]
+    ]
 
     metatimes = [int(t) for t in meta_pd_filtered["time"]]
 
@@ -456,9 +465,9 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
     for q in equals:
         if (
-                q not in events[:, 0]
-                and q not in events[:, 0] + 1
-                and q not in events[:, 0] - 1
+            q not in events[:, 0]
+            and q not in events[:, 0] + 1
+            and q not in events[:, 0] - 1
         ):
             events = np.append(events, [[q, 0, 63]], axis=0)
 
@@ -473,13 +482,13 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
         for q in equals:
             if (
-                    q not in events[:, 0]
-                    and q not in events[:, 0] + 1
-                    and q not in events[:, 0] - 1
+                q not in events[:, 0]
+                and q not in events[:, 0] + 1
+                and q not in events[:, 0] - 1
             ):
                 events = np.append(
                     events,
-                    [[q, 0, int(2 ** a + 2 ** b + 2 ** c + 2 ** d + 2 ** e)]],
+                    [[q, 0, int(2**a + 2**b + 2**c + 2**d + 2**e)]],
                     axis=0,
                 )
 
@@ -494,12 +503,12 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
         for q in equals:
             if (
-                    q not in events[:, 0]
-                    and q not in events[:, 0] + 1
-                    and q not in events[:, 0] - 1
+                q not in events[:, 0]
+                and q not in events[:, 0] + 1
+                and q not in events[:, 0] - 1
             ):
                 events = np.append(
-                    events, [[q, 0, int(2 ** a + 2 ** b + 2 ** c + 2 ** d)]], axis=0
+                    events, [[q, 0, int(2**a + 2**b + 2**c + 2**d)]], axis=0
                 )
 
     for a, b, c in combinations(range(6), 3):
@@ -511,13 +520,11 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
         for q in equals:
             if (
-                    q not in events[:, 0]
-                    and q not in events[:, 0] + 1
-                    and q not in events[:, 0] - 1
+                q not in events[:, 0]
+                and q not in events[:, 0] + 1
+                and q not in events[:, 0] - 1
             ):
-                events = np.append(
-                    events, [[q, 0, int(2 ** a + 2 ** b + 2 ** c)]], axis=0
-                )
+                events = np.append(events, [[q, 0, int(2**a + 2**b + 2**c)]], axis=0)
 
     for a, b in combinations(range(6), 2):
         equals = np.intersect1d(evs_tol[a], evs_tol[b])
@@ -528,28 +535,28 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
         for q in equals:
             if (
-                    q not in events[:, 0]
-                    and q not in events[:, 0] + 1
-                    and q not in events[:, 0] - 1
+                q not in events[:, 0]
+                and q not in events[:, 0] + 1
+                and q not in events[:, 0] - 1
             ):
-                events = np.append(events, [[q, 0, int(2 ** a + 2 ** b)]], axis=0)
+                events = np.append(events, [[q, 0, int(2**a + 2**b)]], axis=0)
 
     # Get single-channel events
     for i in range(6):
         for e in evs[i]:
             if (
-                    e not in events[:, 0]
-                    and e not in events[:, 0] + 1
-                    and e not in events[:, 0] - 1
+                e not in events[:, 0]
+                and e not in events[:, 0] + 1
+                and e not in events[:, 0] - 1
             ):
-                events = np.append(events, [[e, 0, 2 ** i]], axis=0)
+                events = np.append(events, [[e, 0, 2**i]], axis=0)
 
     # sort only along samples(column 0)
     events = events[events[:, 0].argsort()]
 
     # apply latency correction
     events[:, 0] = [
-        ts + np.round(adjust_timeline_by_msec * 10 ** -3 * raw.info["sfreq"])
+        ts + np.round(adjust_timeline_by_msec * 10**-3 * raw.info["sfreq"])
         for ts in events[:, 0]
     ]
 
@@ -563,18 +570,18 @@ def find_6ch_binary_events(meeg, min_duration, shortest_event, adjust_timeline_b
 
 
 def get_load_cell_events_regression_baseline(
-        meeg,
-        min_duration,
-        shortest_event,
-        adjust_timeline_by_msec,
-        diff_window,
-        min_ev_distance,
-        max_ev_distance,
-        len_baseline,
-        baseline_limit,
-        regression_degree,
-        trig_channel,
-        n_jobs,
+    meeg,
+    min_duration,
+    shortest_event,
+    adjust_timeline_by_msec,
+    diff_window,
+    min_ev_distance,
+    max_ev_distance,
+    len_baseline,
+    baseline_limit,
+    regression_degree,
+    trig_channel,
+    n_jobs,
 ):
     """The events are extracted from the load-cell signal using a rolling-difference, baseline and regression."""
     # Load Raw and extract the load-cell-trigger-channel
@@ -646,13 +653,13 @@ def get_load_cell_events_regression_baseline(
         # Get Trigger-Time by finding the first samples going from peak crossing the baseline
         # (from baseline_limit with length=len_baseline)
         pre_baseline_mean = np.asarray(
-            eeg_series[pk - (len_baseline + baseline_limit): pk - baseline_limit + 1]
+            eeg_series[pk - (len_baseline + baseline_limit) : pk - baseline_limit + 1]
         ).mean()
         post_baseline_mean = np.asarray(
-            eeg_series[pk + baseline_limit: pk + baseline_limit + len_baseline + 1]
+            eeg_series[pk + baseline_limit : pk + baseline_limit + len_baseline + 1]
         ).mean()
-        pre_peak_data = np.flip(np.asarray(eeg_series[pk - min_ev_distance: pk + 1]))
-        post_peak_data = np.asarray(eeg_series[pk: pk + min_ev_distance + 1])
+        pre_peak_data = np.flip(np.asarray(eeg_series[pk - min_ev_distance : pk + 1]))
+        post_peak_data = np.asarray(eeg_series[pk : pk + min_ev_distance + 1])
         if pre_baseline_mean > post_baseline_mean:
             first_idx = pk - (pre_peak_data > pre_baseline_mean).argmax()
             last_idx = pk + (post_peak_data < post_baseline_mean).argmax()
@@ -704,8 +711,8 @@ def get_load_cell_events_regression_baseline(
             event_id_last = 9
 
         for timep, evid in zip(
-                [first_time, peak_time, last_time],
-                [event_id_first, event_id_middle, event_id_last],
+            [first_time, peak_time, last_time],
+            [event_id_first, event_id_middle, event_id_last],
         ):
             meta_dict = {
                 "time": timep,
@@ -785,10 +792,10 @@ def get_load_cell_events_regression_baseline(
             if idx == len(events_meta_dict) - 1:
                 # Fill the time before and after the last event
                 first_fill_time = first_time - (
-                        events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
+                    events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
                 )
                 last_fill_time = eeg_raw.n_times - (
-                        events_meta_dict[ev_idx]["last_time"] - eeg_raw.first_samp
+                    events_meta_dict[ev_idx]["last_time"] - eeg_raw.first_samp
                 )
                 reg_signal = np.concatenate(
                     [
@@ -801,7 +808,7 @@ def get_load_cell_events_regression_baseline(
             else:
                 # Fill the time between events
                 fill_time = first_time - (
-                        events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
+                    events_meta_dict[previous_idx]["last_time"] - eeg_raw.first_samp
                 )
                 reg_signal = np.concatenate(
                     [reg_signal, np.full(fill_time, best_y[0]), best_y]
@@ -823,11 +830,11 @@ def get_load_cell_events_regression_baseline(
 
 
 def _get_load_cell_epochs(
-        meeg,
-        trig_plt_time,
-        baseline_limit,
-        trig_channel,
-        apply_savgol=False,
+    meeg,
+    trig_plt_time,
+    baseline_limit,
+    trig_channel,
+    apply_savgol=False,
 ):
     raw = meeg.load_raw()
     eeg_raw = raw.copy().pick(trig_channel)
@@ -841,7 +848,7 @@ def _get_load_cell_epochs(
 
     # Exclude rating-trials
     for idx, trial in enumerate(
-            [t for t in meeg.sel_trials if any([s in t for s in ["Down", "Up"]])]
+        [t for t in meeg.sel_trials if any([s in t for s in ["Down", "Up"]])]
     ):
         selected_ev_id = {key: value for key, value in event_id.items() if key == trial}
         # if 'Last' in trial:
@@ -865,13 +872,13 @@ def _get_load_cell_epochs(
             epd = ep[0]
             half_idx = int(len(epd) / 2) + 1
             if "Last" in trial:
-                epd -= np.mean(epd[half_idx + baseline_limit:])
+                epd -= np.mean(epd[half_idx + baseline_limit :])
             else:
                 epd -= np.mean(epd[: half_idx - baseline_limit])
 
-            if np.mean(epd[half_idx + baseline_limit:]) < 0 and "Down" in trial:
+            if np.mean(epd[half_idx + baseline_limit :]) < 0 and "Down" in trial:
                 epd *= -1
-            elif np.mean(epd[half_idx + baseline_limit:]) > 0 and "Up" in trial:
+            elif np.mean(epd[half_idx + baseline_limit :]) > 0 and "Up" in trial:
                 epd *= -1
 
             if apply_savgol:
@@ -920,10 +927,26 @@ def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
             rating_dict = _merge_measurements(rating_dict, combine="combine")
             for idx, (meeg_name, ratings) in enumerate(rating_dict.items()):
                 for rat in ratings:
-                    df = pd.concat([df, pd.DataFrame({y: rat, x: idx + 1, hue: group_name}, index=[0])], axis=0,
-                                   ignore_index=True, )
+                    df = pd.concat(
+                        [
+                            df,
+                            pd.DataFrame(
+                                {y: rat, x: idx + 1, hue: group_name}, index=[0]
+                            ),
+                        ],
+                        axis=0,
+                        ignore_index=True,
+                    )
 
-        sns.boxplot(data=df, x=x, y=y, whis=(1, 99), hue=hue, palette=group_colors, ax=axes[ax_idx])
+        sns.boxplot(
+            data=df,
+            x=x,
+            y=y,
+            whis=(1, 99),
+            hue=hue,
+            palette=group_colors,
+            ax=axes[ax_idx],
+        )
         axes[ax_idx].set_title(title)
         axes[ax_idx].legend(loc="upper right")
         axes[ax_idx].label_outer()
@@ -998,7 +1021,9 @@ def _get_n_subplots(n_items):
     return nrows, ncols, ax_idxs
 
 
-def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jobs, plot_language):
+def plot_ratings_evoked_comparision(
+    ct, ch_types, group_colors, show_plots, n_jobs, plot_language
+):
     """Evokedsa are compared for lower and higher rating."""
     plt.rcParams.update({"font.size": fontsize})
     for language, lang_values in _get_language(plot_language).items():
@@ -1027,10 +1052,12 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
                 for query_trial in rating_queries:
                     gfps[query_trial] = dict()
                     for evokeds, meeg in group.load_items(
-                            obj_type="MEEG", data_type="evoked"
+                        obj_type="MEEG", data_type="evoked"
                     ):
                         try:
-                            evoked = [ev for ev in evokeds if ev.comment == query_trial][0]
+                            evoked = [
+                                ev for ev in evokeds if ev.comment == query_trial
+                            ][0]
                             sfreq = evoked.info["sfreq"]
                         except IndexError:
                             raise RuntimeWarning(
@@ -1065,21 +1092,32 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
                     lpass=30,
                     factor=factor,
                     xlabel=lang_values["xlabel"],
-                    ylabel=f"{lang_values['volt']} [{unit}]" if ch_type == "eeg" else f"{lang_values['mag']} [{unit}]",
+                    ylabel=(
+                        f"{lang_values['volt']} [{unit}]"
+                        if ch_type == "eeg"
+                        else f"{lang_values['mag']} [{unit}]"
+                    ),
                     group_colors=colors,
                     group_alphas=alphas,
                     bonferroni_factor=ncols,
                 )
 
                 for cld in cluster_data:
-                    data_dict = {cn: cv for cn, cv in zip(
-                        lang_values["columns"], [
-                            group_name,
-                            ch_type_aliases[ch_type],
-                            f"{cld['start']}-{cld['stop']}",
-                            cld["p_val"]
-                        ])}
-                    data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+                    data_dict = {
+                        cn: cv
+                        for cn, cv in zip(
+                            lang_values["columns"],
+                            [
+                                group_name,
+                                ch_type_aliases[ch_type],
+                                f"{cld['start']}-{cld['stop']}",
+                                cld["p_val"],
+                            ],
+                        )
+                    }
+                    data_df = pd.concat(
+                        [data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True
+                    )
 
         ct_alias = {"eeg": "EEG", "grad": "MEG"}
         xtitles = {g: group_colors[g] for g in ct.pr.sel_groups}
@@ -1090,14 +1128,27 @@ def plot_ratings_evoked_comparision(ct, ch_types, group_colors, show_plots, n_jo
         if show_plots:
             plt.show()
         exp = "exp1" if "1" in ct.pr.name else "exp2"
-        latex_path = join(plot_group.figures_path, f"{exp}_evoked_rating_stats_{language}.tex")
+        latex_path = join(
+            plot_group.figures_path, f"{exp}_evoked_rating_stats_{language}.tex"
+        )
         _save_latex_table(
-            data_df, latex_path,
+            data_df,
+            latex_path,
             caption=lang_values["caption"],
-            label=f"tab:{exp}_evoked_rating_stats")
+            label=f"tab:{exp}_evoked_rating_stats",
+        )
 
 
-def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, group_colors, show_plots, n_jobs, plot_language):
+def plot_ratings_ltc_comparision(
+    ct,
+    target_labels,
+    label_alias,
+    label_colors,
+    group_colors,
+    show_plots,
+    n_jobs,
+    plot_language,
+):
     """Evokedsa are compared for lower and higher rating."""
     plt.rcParams.update({"font.size": fontsize})
     for language, lang_values in _get_language(plot_language).items():
@@ -1125,7 +1176,7 @@ def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, g
                 for label in target_labels:
                     ltc_dict[query_trial][label] = dict()
                     for ltcs, meeg in group.load_items(
-                            obj_type="MEEG", data_type="ltc"
+                        obj_type="MEEG", data_type="ltc"
                     ):
                         ltcs = ltcs[query_trial]
                         times = ltcs[label][1]
@@ -1134,7 +1185,9 @@ def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, g
             if ct.pr.name == "Experiment1":
                 for trial in ltc_dict:
                     for label in ltc_dict[trial]:
-                        ltc_dict[trial][label] = _merge_measurements(ltc_dict[trial][label])
+                        ltc_dict[trial][label] = _merge_measurements(
+                            ltc_dict[trial][label]
+                        )
 
             for row_idx, label_name in enumerate(target_labels):
                 group_data = list()
@@ -1156,16 +1209,25 @@ def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, g
                     bonferroni_factor=bonferroni_factor,
                     group_alphas=alphas,
                 )
-                _add_label_inset(axes[row_idx, col_idx], label_name, [0.05, 0.7, 0.25, 0.25])
+                _add_label_inset(
+                    axes[row_idx, col_idx], label_name, [0.05, 0.7, 0.25, 0.25]
+                )
                 for cld in cluster_data:
-                    data_dict = {cn: cv for cn, cv in zip(
-                        lang_values["columns"], [
-                            " - ".join(rating_groups),
-                            label_name,
-                            f"{cld['start']}-{cld['stop']}",
-                            cld["p_val"]
-                        ])}
-                    data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+                    data_dict = {
+                        cn: cv
+                        for cn, cv in zip(
+                            lang_values["columns"],
+                            [
+                                " - ".join(rating_groups),
+                                label_name,
+                                f"{cld['start']}-{cld['stop']}",
+                                cld["p_val"],
+                            ],
+                        )
+                    }
+                    data_df = pd.concat(
+                        [data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True
+                    )
 
         xtitles = {g: group_colors[g] for g in ct.pr.sel_groups}
         ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
@@ -1178,21 +1240,25 @@ def plot_ratings_ltc_comparision(ct, target_labels, label_alias, label_colors, g
         if show_plots:
             plt.show()
         exp = "exp1" if "1" in ct.pr.name else "exp2"
-        latex_path = join(plot_group.figures_path, f"{exp}_ltc_rating_stats_{language}.tex")
+        latex_path = join(
+            plot_group.figures_path, f"{exp}_ltc_rating_stats_{language}.tex"
+        )
         _save_latex_table(
-            data_df, latex_path,
+            data_df,
+            latex_path,
             caption=lang_values["caption"],
-            label=f"tab:{exp}_ltc_rating_stats")
+            label=f"tab:{exp}_ltc_rating_stats",
+        )
 
 
 def plot_load_cell_group_ave(
-        ct,
-        trig_plt_time,
-        baseline_limit,
-        show_plots,
-        apply_savgol,
-        trig_channel,
-        group_colors,
+    ct,
+    trig_plt_time,
+    baseline_limit,
+    show_plots,
+    apply_savgol,
+    trig_channel,
+    group_colors,
 ):
     """The Load-Cell-Signal is plotted for all groups and subjects."""
     groups = [g for g in ct.pr.sel_groups if "Laser" not in g]
@@ -1213,14 +1279,18 @@ def plot_load_cell_group_ave(
             for epd in epochs_dict["Down"]:
                 epo_data.append(epd)
                 ax.plot(
-                    times, epd, color=group_colors.get(group_name, "k"), alpha=0.1, label=group_name,
+                    times,
+                    epd,
+                    color=group_colors.get(group_name, "k"),
+                    alpha=0.1,
+                    label=group_name,
                 )
     handles, labels = ax.get_legend_handles_labels()
     newLabels, newHandles = [], []
     for handle, label in zip(handles, labels):
-      if label not in newLabels:
-        newLabels.append(label)
-        newHandles.append(handle)
+        if label not in newLabels:
+            newLabels.append(label)
+            newHandles.append(handle)
     legend = ax.legend(newHandles, newLabels, loc="upper right")
     for lh in legend.legendHandles:
         lh.set_alpha(1)
@@ -1270,7 +1340,7 @@ def _convert_units(val, unit, long=False):
             prefix = "a"
     else:
         prefix = ""
-    factor = 10 ** -exp
+    factor = 10**-exp
     unit = prefix + unit
 
     return factor, unit
@@ -1280,7 +1350,9 @@ def _tick_formatter(x, pos, factor):
     return str(round(x * factor, 3))
 
 
-def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots, plot_language):
+def plot_gfp_group_stacked(
+    ct, group_colors, ch_types, show_plots, save_plots, plot_language
+):
     """The GFP of all groups is compared."""
     plt.rcParams.update({"font.size": fontsize})
     for language, lang_values in _get_language(plot_language).items():
@@ -1307,7 +1379,7 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots, p
                     # Apply lowpass filter 30 Hz
                     gfp = mne.filter.filter_data(gfp, 1000, None, 30)
                     gfps.append(gfp)
-                y = np.mean(gfps, axis=0),
+                y = (np.mean(gfps, axis=0),)
                 this_min = np.min(y)
                 min_val = np.min([min_val, this_min])
                 axes[ax_idx].plot(
@@ -1318,10 +1390,15 @@ def plot_gfp_group_stacked(ct, group_colors, ch_types, show_plots, save_plots, p
                 )
             unit = "V" if ch_type == "eeg" else "T/cm"
             factor, unit = _convert_units(min_val, unit)
-            axes[ax_idx].yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
+            axes[ax_idx].yaxis.set_major_formatter(
+                FuncFormatter(partial(_tick_formatter, factor=factor))
+            )
             axes[ax_idx].set_title(ch_type_aliases[ch_type])
             axes[ax_idx].set_xlabel(lang_values["xlabel"])
-            axes[ax_idx].set_ylabel(f"{lang_values['volt']} [{unit}]" if ch_type == "eeg" else f"{lang_values['mag']} [{unit}]"
+            axes[ax_idx].set_ylabel(
+                f"{lang_values['volt']} [{unit}]"
+                if ch_type == "eeg"
+                else f"{lang_values['mag']} [{unit}]"
             )
             axes[ax_idx].legend(loc="upper right", fontsize="small")
         plt.tight_layout()
@@ -1341,7 +1418,16 @@ def _add_label_inset(ax, label_name, bounds):
         print(f"Image for {label_name} not found.")
 
 
-def plot_ltc_group_stacked(ct, group_colors, target_labels, label_colors, label_alias, show_plots, save_plots, plot_language):
+def plot_ltc_group_stacked(
+    ct,
+    group_colors,
+    target_labels,
+    label_colors,
+    label_alias,
+    show_plots,
+    save_plots,
+    plot_language,
+):
     """The label-time-course of all groups is compared."""
     plt.rcParams.update({"font.size": fontsize})
     for language, lang_values in _get_language(plot_language).items():
@@ -1374,12 +1460,16 @@ def plot_ltc_group_stacked(ct, group_colors, target_labels, label_colors, label_
                     color=group_colors.get(group_name, "k"),
                 )
                 _add_label_inset(axes[ax_idx], label_name, [0, 0.65, 0.3, 0.3])
-                axes[ax_idx].set_title(label_alias[label_name], color=label_colors[label_name])
+                axes[ax_idx].set_title(
+                    label_alias[label_name], color=label_colors[label_name]
+                )
         factor, unit = _convert_units(min_val, "")
         for ax in axes.flat:
-            ax.yaxis.set_major_formatter(FuncFormatter(partial(_tick_formatter, factor=factor)))
+            ax.yaxis.set_major_formatter(
+                FuncFormatter(partial(_tick_formatter, factor=factor))
+            )
             ax.set_xlabel(lang_values["xlabel"])
-            ax.set_ylabel(lang_values['source'])
+            ax.set_ylabel(lang_values["source"])
             ax.legend(loc="upper right", fontsize="small")
             ax.label_outer()
         plt.tight_layout()
@@ -1404,17 +1494,43 @@ def _get_threshold(p_value, n_observations, tail=0):
     return threshold
 
 
-def _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel=None, ylabel=None, left=0.1, top=0.95, wspace=0.1,
-                               pad=5, tight=True):
+def _2d_grid_titles_and_labels(
+    fig,
+    axes,
+    xtitles,
+    ytitles,
+    xlabel=None,
+    ylabel=None,
+    left=0.1,
+    top=0.95,
+    wspace=0.1,
+    pad=5,
+    tight=True,
+):
     for ax, (title, color) in zip(axes[0], xtitles.items()):
-        ax.annotate(title, xy=(0.5, 1), xytext=(0, pad),
-                    xycoords='axes fraction', textcoords='offset points',
-                    ha='center', va='baseline', color=color)
+        ax.annotate(
+            title,
+            xy=(0.5, 1),
+            xytext=(0, pad),
+            xycoords="axes fraction",
+            textcoords="offset points",
+            ha="center",
+            va="baseline",
+            color=color,
+        )
 
     for ax, (title, color) in zip(axes[:, 0], ytitles.items()):
-        ax.annotate(title, xy=(0, 0.5), xytext=(-ax.yaxis.labelpad - pad, 0),
-                    xycoords=ax.yaxis.label, textcoords='offset points',
-                    ha='right', va='center', color=color, rotation=90)
+        ax.annotate(
+            title,
+            xy=(0, 0.5),
+            xytext=(-ax.yaxis.labelpad - pad, 0),
+            xycoords=ax.yaxis.label,
+            textcoords="offset points",
+            ha="right",
+            va="center",
+            color=color,
+            rotation=90,
+        )
 
     if xlabel is not None:
         for ax in axes[-1, :]:
@@ -1432,24 +1548,24 @@ cluster_counter = 1
 
 
 def _plot_permutation_cluster_test(
-        group_data,
-        times,
-        group_names,
-        one_sample=False,
-        n_permutations=1000,
-        p_value=0.05,
-        bonferroni_factor=1,
-        tail=0,
-        n_jobs=-1,
-        ax=None,
-        factor=1,
-        xlabel="Zeit [s]",
-        ylabel="elektrische Spannung",
-        sfreq=1000,
-        hpass=None,
-        lpass=30,
-        group_colors={},
-        group_alphas={},
+    group_data,
+    times,
+    group_names,
+    one_sample=False,
+    n_permutations=1000,
+    p_value=0.05,
+    bonferroni_factor=1,
+    tail=0,
+    n_jobs=-1,
+    ax=None,
+    factor=1,
+    xlabel="Zeit [s]",
+    ylabel="elektrische Spannung",
+    sfreq=1000,
+    hpass=None,
+    lpass=30,
+    group_colors={},
+    group_alphas={},
 ):
     # Compute permutation cluster test
     global cluster_counter
@@ -1551,19 +1667,25 @@ def _significant_formatter(value):
 
 
 def _save_latex_table(data_df, latex_path, caption, label):
-    with open(latex_path, "w", encoding="utf-8", ) as latex_file:
+    with open(
+        latex_path,
+        "w",
+        encoding="utf-8",
+    ) as latex_file:
         if len(data_df) == 0:
             latex_file.write("")
         else:
             data_df.index = np.arange(len(data_df)) + 1
             data_df.to_latex(
                 buf=latex_file,
-                formatters=[_significant_formatter for i in range(len(data_df.columns))],
+                formatters=[
+                    _significant_formatter for i in range(len(data_df.columns))
+                ],
                 caption=caption,
                 label=label,
-                column_format="|".join(["c" for i in range(len(data_df.columns) + 1)]),
-                index_names=True
+                index_names=True,
             )
+
 
 def _get_language(language):
     if language == "all":
@@ -1573,8 +1695,16 @@ def _get_language(language):
     plot_language = {lang: lang_dict[lang] for lang in language_list}
     return plot_language
 
+
 def evoked_temporal_cluster(
-        ct, ch_types, group_colors, compare_groups, cluster_trial, n_jobs, show_plots, plot_language,
+    ct,
+    ch_types,
+    group_colors,
+    compare_groups,
+    cluster_trial,
+    n_jobs,
+    show_plots,
+    plot_language,
 ):
     """A 1sample-permutation-cluster-test with clustering in time is performed between the evoked of two stimulus-groups."""
     plt.rcParams.update({"font.size": fontsize})
@@ -1587,7 +1717,6 @@ def evoked_temporal_cluster(
             sharex=True,
             sharey="row",
             figsize=(figwidth, 2 * nrows),
-
         )
         data_df = pd.DataFrame([], columns=lang_values["columns"])
         if nrows == 1:
@@ -1603,7 +1732,7 @@ def evoked_temporal_cluster(
                     trial = cluster_trial.get(group_name)
                     datas = dict()
                     for evokeds, meeg in group.load_items(
-                            obj_type="MEEG", data_type="evoked"
+                        obj_type="MEEG", data_type="evoked"
                     ):
                         try:
                             evoked = [ev for ev in evokeds if ev.comment == trial][0]
@@ -1632,18 +1761,29 @@ def evoked_temporal_cluster(
                     lpass=30,
                     factor=factor,
                     xlabel=lang_values["xlabel"],
-                    ylabel=f"{lang_values['volt']} [{unit}]" if ch_type == "eeg" else f"{lang_values['mag']} [{unit}]",
-                    bonferroni_factor=bonferroni_factor
+                    ylabel=(
+                        f"{lang_values['volt']} [{unit}]"
+                        if ch_type == "eeg"
+                        else f"{lang_values['mag']} [{unit}]"
+                    ),
+                    bonferroni_factor=bonferroni_factor,
                 )
                 for cld in cluster_data:
-                    data_dict = {cn: cv for cn, cv in zip(
-                        lang_values["columns"], [
-                            " - ".join(group_names),
-                            ch_type_aliases[ch_type],
-                            f"{cld['start']}-{cld['stop']}",
-                            cld["p_val"]
-                        ])}
-                    data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+                    data_dict = {
+                        cn: cv
+                        for cn, cv in zip(
+                            lang_values["columns"],
+                            [
+                                " - ".join(group_names),
+                                ch_type_aliases[ch_type],
+                                f"{cld['start']}-{cld['stop']}",
+                                cld["p_val"],
+                            ],
+                        )
+                    }
+                    data_df = pd.concat(
+                        [data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True
+                    )
         xtitles = {"-".join(cg): "k" for cg in compare_groups}
         ytitles = {ch_type_aliases[ct]: "k" for ct in ch_types}
         _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, left=0.1, top=0.85)
@@ -1653,14 +1793,25 @@ def evoked_temporal_cluster(
             plt.show()
         exp = "exp1" if "1" in ct.pr.name else "exp2"
         latex_path = join(plot_group.figures_path, f"{exp}_evoked_stats_{language}.tex")
-        _save_latex_table(data_df, latex_path,
-                          caption=lang_values["caption"],
-                          label=f"tab:{exp}_evoked_stats")
+        _save_latex_table(
+            data_df,
+            latex_path,
+            caption=lang_values["caption"],
+            label=f"tab:{exp}_evoked_stats",
+        )
 
 
 def ltc_temporal_cluster(
-        ct, compare_groups, group_colors, target_labels, label_alias, label_colors, cluster_trial, n_jobs, show_plots,
-        plot_language
+    ct,
+    compare_groups,
+    group_colors,
+    target_labels,
+    label_alias,
+    label_colors,
+    cluster_trial,
+    n_jobs,
+    show_plots,
+    plot_language,
 ):
     plt.rcParams.update({"font.size": fontsize})
     for language, lang_values in _get_language(plot_language).items():
@@ -1717,18 +1868,27 @@ def ltc_temporal_cluster(
                     ylabel=f"{lang_values['source']} [{unit}]",
                     bonferroni_factor=bonferroni_factor,
                 )
-                _add_label_inset(axes[row_idx, col_idx], label_name, [0.05, 0.7, 0.25, 0.25])
+                _add_label_inset(
+                    axes[row_idx, col_idx], label_name, [0.05, 0.7, 0.25, 0.25]
+                )
                 for cld in cluster_data:
-                    data_dict = {cn: cv for cn, cv in zip(
-                        lang_values["columns"], [
-                            " - ".join(group_names),
-                            label_name,
-                            f"{cld['start']}-{cld['stop']}",
-                            cld["p_val"]
-                        ])}
-                    data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+                    data_dict = {
+                        cn: cv
+                        for cn, cv in zip(
+                            lang_values["columns"],
+                            [
+                                " - ".join(group_names),
+                                label_name,
+                                f"{cld['start']}-{cld['stop']}",
+                                cld["p_val"],
+                            ],
+                        )
+                    }
+                    data_df = pd.concat(
+                        [data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True
+                    )
 
-        xtitles = {'-'.join(gn): "k" for gn in compare_groups}
+        xtitles = {"-".join(gn): "k" for gn in compare_groups}
         ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
         xlabel = lang_values["xlabel"]
         ylabel = lang_values["source"]
@@ -1741,19 +1901,21 @@ def ltc_temporal_cluster(
         exp = "exp1" if "1" in ct.pr.name else "exp2"
         latex_path = join(plot_group.figures_path, f"{exp}_ltc_stats_{language}.tex")
         _save_latex_table(
-            data_df, latex_path,
+            data_df,
+            latex_path,
             caption=lang_values["caption"],
-            label=f"tab:{exp}_ltc_stats")
+            label=f"tab:{exp}_ltc_stats",
+        )
 
 
 def label_power(
-        meeg,
-        tfr_freqs,
-        inverse_method,
-        target_labels,
-        tfr_baseline,
-        tfr_baseline_mode,
-        n_jobs,
+    meeg,
+    tfr_freqs,
+    inverse_method,
+    target_labels,
+    tfr_baseline,
+    tfr_baseline_mode,
+    n_jobs,
 ):
     """The power inside the given labels is computed and saved."""
     inv_op = meeg.load_inverse_operator()
@@ -1785,14 +1947,29 @@ def label_power(
             np.save(power_save_path, power)
 
 
-def plot_label_power(ct, tfr_freqs, target_labels, label_alias, label_colors, group_colors, cluster_trial, show_plots):
+def plot_label_power(
+    ct,
+    tfr_freqs,
+    target_labels,
+    label_alias,
+    label_colors,
+    group_colors,
+    cluster_trial,
+    show_plots,
+):
     """Plot the label power and compute permutation-cluster statistics against 0."""
     tfr_dict = dict()
     nrows = len(target_labels)
     ncols = len(ct.pr.sel_groups)
     plt.rcParams.update({"font.size": fontsize})
-    fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True, figsize=(ncols * 2.5, nrows * 2.5),
-                             layout="constrained")
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        sharex=True,
+        sharey=True,
+        figsize=(ncols * 2.5, nrows * 2.5),
+        layout="constrained",
+    )
     im = None
     for col_idx, group_name in enumerate(ct.pr.sel_groups):
         tfr_dict[group_name] = dict()
@@ -1828,23 +2005,21 @@ def plot_label_power(ct, tfr_freqs, target_labels, label_alias, label_colors, gr
     ylabel = "Frequenz [Hz]"
     _2d_grid_titles_and_labels(fig, axes, xtitles, ytitles, xlabel, ylabel, tight=False)
 
-    Group("all", ct).plot_save(
-        "label_power", matplotlib_figure=fig
-    )
+    Group("all", ct).plot_save("label_power", matplotlib_figure=fig)
     if show_plots:
         plt.show()
 
 
 def label_power_cond_permclust(
-        ct,
-        compare_groups,
-        label_colors,
-        label_alias,
-        tfr_freqs,
-        target_labels,
-        cluster_trial,
-        n_jobs,
-        show_plots,
+    ct,
+    compare_groups,
+    label_colors,
+    label_alias,
+    tfr_freqs,
+    target_labels,
+    cluster_trial,
+    n_jobs,
+    show_plots,
 ):
     """The power inside the given labels is compared between groups with a 1sample-permutation-cluster-test with clustering in time and frequency."""
     """As in Compute power and phase lock in label of the source space."""
@@ -1852,7 +2027,12 @@ def label_power_cond_permclust(
     ncols = len(compare_groups)
     plt.rcParams.update({"font.size": fontsize})
     fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols, sharex=True, sharey=True, figsize=(2.5 * ncols, 2.5 * nrows), layout="constrained"
+        nrows=nrows,
+        ncols=ncols,
+        sharex=True,
+        sharey=True,
+        figsize=(2.5 * ncols, 2.5 * nrows),
+        layout="constrained",
     )
     ims = list()
     diff_avgs = list()
@@ -1860,7 +2040,9 @@ def label_power_cond_permclust(
     bonferroni_factor = nrows * ncols
     p_value /= bonferroni_factor
     tail = 1
-    data_df = pd.DataFrame([], columns=["Vergleich", "Label", "Zeit", "Frequenz", "p-Wert"])
+    data_df = pd.DataFrame(
+        [], columns=["Vergleich", "Label", "Zeit", "Frequenz", "p-Wert"]
+    )
     for col_idx, group_names in enumerate(compare_groups):
         if len(group_names) > 2:
             raise ValueError("Only two groups allowed for comparison")
@@ -1913,13 +2095,19 @@ def label_power_cond_permclust(
                     fmax = np.round(tfr_freqs[np.max(c[1])], 3)
                     cpval = cluster_p_values[c_idx]
                     data_df = pd.concat(
-                        [data_df,
-                         pd.DataFrame(
-                             {"Vergleich": "-".join(group_names),
-                              "Label": label_name,
-                              "Zeit": f"{tmin}-{tmax} s",
-                              "Frequenz": f"{fmin}-{fmax} Hz",
-                              "p-Wert": cpval * bonferroni_factor}, index=[0])],
+                        [
+                            data_df,
+                            pd.DataFrame(
+                                {
+                                    "Vergleich": "-".join(group_names),
+                                    "Label": label_name,
+                                    "Zeit": f"{tmin}-{tmax} s",
+                                    "Frequenz": f"{fmin}-{fmax} Hz",
+                                    "p-Wert": cpval * bonferroni_factor,
+                                },
+                                index=[0],
+                            ),
+                        ],
                         ignore_index=True,
                     )
 
@@ -1949,7 +2137,7 @@ def label_power_cond_permclust(
             ims.append(im_sig)
     for ax in axes[:, -1]:
         fig.colorbar(im_sig, ax=ax)
-    xtitles = {'-'.join(gn): "k" for gn in compare_groups}
+    xtitles = {"-".join(gn): "k" for gn in compare_groups}
     ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
     xlabel = "Zeit [s]"
     ylabel = "Frequenz [Hz]"
@@ -1962,17 +2150,18 @@ def label_power_cond_permclust(
         im.set(clim=(vmin, vmax))
 
     plot_group = Group("all", ct)
-    plot_group.plot_save(
-        f"label_power_permclust", matplotlib_figure=fig
-    )
+    plot_group.plot_save(f"label_power_permclust", matplotlib_figure=fig)
 
     if show_plots:
         fig.show()
     exp = "exp1" if "1" in ct.pr.name else "exp2"
     latex_path = join(plot_group.figures_path, f"{exp}_label_power_stats.tex")
-    _save_latex_table(data_df, latex_path,
-                      caption="Signifikante Cluster der Cluster--Permutationstests der Label-Power. p--Werte sind Bonferroni--korrigiert.",
-                      label=f"tab:{exp}_label_power_stats")
+    _save_latex_table(
+        data_df,
+        latex_path,
+        caption="Signifikante Cluster der Cluster--Permutationstests der Label-Power. p--Werte sind Bonferroni--korrigiert.",
+        label=f"tab:{exp}_label_power_stats",
+    )
 
 
 def _connectivity_geodesic_dist(A, B):
@@ -1997,17 +2186,18 @@ def _connectivity_geodesic_dist(A, B):
 
 
 def connectivity_geodesic_statistics(
-        ct,
-        compare_groups,
-        cluster_trial,
-        show_plots,
-        save_plots,
-        con_fmin,
-        con_fmax,
+    ct,
+    compare_groups,
+    cluster_trial,
+    show_plots,
+    save_plots,
+    con_fmin,
+    con_fmax,
 ):
     """This computes the geodesic distance between connectivity matrices of two groups,
     calculates a 1sample-t-test and plots the results."""
     from statannotations.Annotator import Annotator
+
     p_value = 0.05
     if not isinstance(con_fmin, list):
         con_fmin = [con_fmin]
@@ -2019,7 +2209,10 @@ def connectivity_geodesic_statistics(
     y = "Geodätische Distanz"
     plt.rcParams.update({"font.size": fontsize})
     fig, axes = plt.subplots(
-        nrows=len(freq_pairs), sharex=True, sharey=True, figsize=(figwidth, 4 * len(freq_pairs))
+        nrows=len(freq_pairs),
+        sharex=True,
+        sharey=True,
+        figsize=(figwidth, 4 * len(freq_pairs)),
     )
     if not isinstance(axes, np.ndarray):
         axes = [axes]
@@ -2048,15 +2241,25 @@ def connectivity_geodesic_statistics(
                     print(exc)
                     print(f"Connectivity-data will be excluded")
                 else:
-                    df = pd.concat([df, pd.DataFrame({y: dist, x: group_key}, index=[0])], axis=0, ignore_index=True)
+                    df = pd.concat(
+                        [df, pd.DataFrame({y: dist, x: group_key}, index=[0])],
+                        axis=0,
+                        ignore_index=True,
+                    )
         pairs = [i for i in itertools.combinations(np.unique(df[x]), 2)]
         sns_ax = sns.boxplot(data=df, x=x, y=y, ax=axes[freq_idx])
         freq_str = f"{int(freq[0])}-{int(freq[1])} Hz"
         axes[freq_idx].set_title(freq_str)
         axes[freq_idx].label_outer()
-        annotator = Annotator(sns_ax, pairs, data=df, x=x, y=y)
-        annotator.configure(test="t-test_paired", comparisons_correction="Bonferroni",
-                            text_format="star", show_test_name=True, hide_non_significant=True)
+        annotator = Annotator(
+            sns_ax, pairs, data=df, x=x, y=y, hide_non_significant=True
+        )
+        annotator.configure(
+            test="t-test_paired",
+            comparisons_correction="Bonferroni",
+            text_format="star",
+            show_test_name=True,
+        )
         result = annotator.apply_and_annotate()
         pattern = r".*P_val:([\d\.e\-\+]*) t=.*"
         for annot in result[1]:
@@ -2070,7 +2273,9 @@ def connectivity_geodesic_statistics(
                     data_dict["Frequenzen"] = freq_str
                     data_dict["Gruppen"] = groups
                     data_dict["p-Wert"] = p
-                    data_df = pd.concat([data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
+                    data_df = pd.concat(
+                        [data_df, pd.DataFrame(data_dict, index=[0])], ignore_index=True
+                    )
             else:
                 print(a_str)
 
@@ -2084,11 +2289,13 @@ def connectivity_geodesic_statistics(
     exp = "exp1" if "1" in ct.pr.name else "exp2"
     latex_path = join(plot_group.figures_path, f"{exp}_con_stats.tex")
     _save_latex_table(
-        data_df, latex_path,
+        data_df,
+        latex_path,
         caption="Ergebnisse des t--Tests für abhängige Stichproben für den Unterschied "
-                "zwischen den Konnektivitsdifferenzen verschiedener Gruppen. "
-                "p--Werte sind Bonferroni--korrigiert.",
-        label=f"tab:{exp}_con_stats")
+        "zwischen den Konnektivitsdifferenzen verschiedener Gruppen. "
+        "p--Werte sind Bonferroni--korrigiert.",
+        label=f"tab:{exp}_con_stats",
+    )
 
 
 def export_ltcs(ltc_target_dir, cluster_trial, ct):
@@ -2110,7 +2317,7 @@ def export_ltcs(ltc_target_dir, cluster_trial, ct):
 
 
 def con_t_test(
-        compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_trial, ct
+    compare_groups, con_fmin, con_fmax, con_compare_labels, cluster_trial, ct
 ):
     if not isinstance(con_fmin, list):
         con_fmin = [con_fmin]
@@ -2132,7 +2339,7 @@ def con_t_test(
                     group = Group(group_name, ct)
                     trial = cluster_trial[group_name]
                     for con, meeg in group.load_items(
-                            obj_type="MEEG", data_type="src_con"
+                        obj_type="MEEG", data_type="src_con"
                     ):
                         con = con[trial]["wpli"]
                         assert len(con.freqs) == len(con_fmin)
@@ -2155,18 +2362,21 @@ def con_t_test(
                 result_str = f"{' vs. '.join(group_names)}, {label_key}, {fmin}-{fmax} Hz: t={result.statistic}, p={result.pvalue}, conf_int={result.confidence_interval()}\n"
                 print(result_str)
         # Apply Bonferroni-Correction
-        reject, pval_corrected = bonferroni_correction(
-            np.asarray(data_df), alpha=0.05
-        )
+        reject, pval_corrected = bonferroni_correction(np.asarray(data_df), alpha=0.05)
         data_df.iloc[:, :] = pval_corrected
-        latex_path = join(
-            ct.pr.save_dir_averages,
-            f"{ct.pr.name}_{' vs. '.join(group_names)}_con_t_statistics.tex",
-        ),
-        _save_latex_table(data_df, latex_path,
-                          caption=f"Ergebnisse des T--Tests für abhängige Stichproben für den Unterschied zwischen {' und '.join(group_names)} in den Konnektivitäten aus {ct.pr.name}."
-                                  f"Die p--Werte sind Bonferroni--korrigiert.",
-                          label=f"tab:con_t_test_{'-'.join(group_names)}")
+        latex_path = (
+            join(
+                ct.pr.save_dir_averages,
+                f"{ct.pr.name}_{' vs. '.join(group_names)}_con_t_statistics.tex",
+            ),
+        )
+        _save_latex_table(
+            data_df,
+            latex_path,
+            caption=f"Ergebnisse des T--Tests für abhängige Stichproben für den Unterschied zwischen {' und '.join(group_names)} in den Konnektivitäten aus {ct.pr.name}."
+            f"Die p--Werte sind Bonferroni--korrigiert.",
+            label=f"tab:con_t_test_{'-'.join(group_names)}",
+        )
 
 
 def add_velo_meta(meeg):
@@ -2225,22 +2435,27 @@ def _get_group(meeg_name, groups, ct):
     return None
 
 
-def combine_meegs_rating(meeg, inverse_method, combine_groups, ch_types,
-                         ch_names,
-                         t_epoch,
-                         baseline,
-                         apply_proj,
-                         reject,
-                         flat,
-                         reject_by_annotation,
-                         bad_interpolation,
-                         use_autoreject,
-                         consensus_percs,
-                         n_interpolates,
-                         overwrite_ar,
-                         decim,
-                         n_jobs,
-                         n_pca_components):
+def combine_meegs_rating(
+    meeg,
+    inverse_method,
+    combine_groups,
+    ch_types,
+    ch_names,
+    t_epoch,
+    baseline,
+    apply_proj,
+    reject,
+    flat,
+    reject_by_annotation,
+    bad_interpolation,
+    use_autoreject,
+    consensus_percs,
+    n_interpolates,
+    overwrite_ar,
+    decim,
+    n_jobs,
+    n_pca_components,
+):
     combine_stc = True
     if _get_group(meeg.name, combine_groups, meeg.ct) is not None:
         first_pattern = r"_(\w{0,7})([ab_]*)"
@@ -2253,39 +2468,54 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups, ch_types,
         if combine_stc:
             all_stcs = []
         stims = []
-        for other_meeg_name in [m for m in meeg.pr.all_meeg if
-                                _get_group(meeg.name, combine_groups, meeg.ct) is not None]:
+        for other_meeg_name in [
+            m
+            for m in meeg.pr.all_meeg
+            if _get_group(meeg.name, combine_groups, meeg.ct) is not None
+        ]:
             match = re.match(sub_name + first_pattern, other_meeg_name)
             if match:
                 other_meeg = MEEG(other_meeg_name, meeg.ct)
                 # This creates epochs which are not baselined to split into the rating groups
                 # and then baselines them afterwards to keep them consistent with other epochs.
-                epoch_raw(other_meeg, ch_types,
-                          ch_names,
-                          t_epoch,
-                          None,
-                          apply_proj,
-                          reject,
-                          flat,
-                          reject_by_annotation,
-                          bad_interpolation,
-                          use_autoreject,
-                          consensus_percs,
-                          n_interpolates,
-                          overwrite_ar,
-                          decim,
-                          n_jobs)
+                epoch_raw(
+                    other_meeg,
+                    ch_types,
+                    ch_names,
+                    t_epoch,
+                    None,
+                    apply_proj,
+                    reject,
+                    flat,
+                    reject_by_annotation,
+                    bad_interpolation,
+                    use_autoreject,
+                    consensus_percs,
+                    n_interpolates,
+                    overwrite_ar,
+                    decim,
+                    n_jobs,
+                )
                 add_ratings_meta(other_meeg)
-                apply_ica(other_meeg, ica_apply_target="epochs", n_pca_components=n_pca_components)
+                apply_ica(
+                    other_meeg,
+                    ica_apply_target="epochs",
+                    n_pca_components=n_pca_components,
+                )
                 other_epochs = other_meeg.load_epochs()
                 all_epochs.append(other_epochs)
                 baselined_epochs = other_epochs.copy().apply_baseline(baseline)
                 other_meeg.save_epochs(baselined_epochs)
-                lambda2 = 1.0 / 3.0 ** 2
+                lambda2 = 1.0 / 3.0**2
                 if combine_stc:
                     other_invop = other_meeg.load_inverse_operator()
-                    other_stcs = apply_inverse_epochs(other_epochs, other_invop, lambda2, method=inverse_method,
-                                                      return_generator=True)
+                    other_stcs = apply_inverse_epochs(
+                        other_epochs,
+                        other_invop,
+                        lambda2,
+                        method=inverse_method,
+                        return_generator=True,
+                    )
                     all_stcs.append(other_stcs)
                 stims.append(_get_group(meeg.name, combine_groups, meeg.ct))
                 print(f"Found {other_meeg_name} for {meeg.name}")
@@ -2314,19 +2544,26 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups, ch_types,
             new_metadata = pd.concat([new_metadata, meta2], axis=0, ignore_index=True)
 
         event_id = {"Stimulation": 1}
-        combined_epochs = mne.EpochsArray(new_data, epochs.info, new_events, tmin=epochs.tmin,
-                                          event_id=event_id,
-                                          baseline=None, metadata=new_metadata)
+        combined_epochs = mne.EpochsArray(
+            new_data,
+            epochs.info,
+            new_events,
+            tmin=epochs.tmin,
+            event_id=event_id,
+            baseline=None,
+            metadata=new_metadata,
+        )
         meta = combined_epochs.metadata.copy()
         meta.dropna(axis=0, subset="rating", inplace=True)
         sort_index = meta.sort_values(by="rating").index
-        idxs_high = sort_index[len(combined_epochs) // 2:]
+        idxs_high = sort_index[len(combined_epochs) // 2 :]
         epochs_high = combined_epochs[idxs_high]
-        idxs_low = sort_index[:len(combined_epochs) // 2]
+        idxs_low = sort_index[: len(combined_epochs) // 2]
         epochs_low = combined_epochs[idxs_low]
         trans = meeg.load_transformation()
         for name, epoch, group_name in zip(
-                [new_high_name, new_low_name], [epochs_high, epochs_low], ["HighR", "LowR"]):
+            [new_high_name, new_low_name], [epochs_high, epochs_low], ["HighR", "LowR"]
+        ):
             new_meeg = meeg.pr.add_meeg(name)
             meeg.pr.meeg_to_fsmri[name] = meeg.fsmri.name
             meeg.pr.sel_event_id[name] = ["Stimulation"]
@@ -2373,10 +2610,18 @@ def combine_meegs_rating(meeg, inverse_method, combine_groups, ch_types,
             stc_data_low /= len(idxs_low)
 
             for name, stc_data, group_name in zip(
-                    [new_high_name, new_low_name], [stc_data_high, stc_data_low], ["HighR", "LowR"]):
+                [new_high_name, new_low_name],
+                [stc_data_high, stc_data_low],
+                ["HighR", "LowR"],
+            ):
                 new_meeg = MEEG(name, meeg.ct)
                 stc = mne.SourceEstimate(
-                    data=stc_data, vertices=vertices, tmin=tmin, tstep=tstep, subject=subject)
+                    data=stc_data,
+                    vertices=vertices,
+                    tmin=tmin,
+                    tstep=tstep,
+                    subject=subject,
+                )
                 new_meeg.save_source_estimates({"Stimulation": stc})
 
     meeg.pr.save()
@@ -2396,8 +2641,13 @@ def plot_rating_share(ct, combine_groups, group_colors, show_plots):
                 else:
                     vals[k].append(0)
         for k, v in vals.items():
-            p = ax[ax_idx].bar([str(i) for i in range(1, len(group.group_list) + 1)], v, bottom=bottom, label=k,
-                               color=group_colors[k])
+            p = ax[ax_idx].bar(
+                [str(i) for i in range(1, len(group.group_list) + 1)],
+                v,
+                bottom=bottom,
+                label=k,
+                color=group_colors[k],
+            )
             bottom += v
 
             ax[ax_idx].bar_label(p, label_type="center")
@@ -2428,9 +2678,13 @@ def plot_rating_combination_test(meeg, combine_groups, show_plots):
         fig, ax = plt.subplots()
         ax.plot(orig_evoked.times, gfp, label=meeg.name)
 
-        other_meegs = [m for m in meeg.pr.all_meeg if
-                       re.match(sub_name + first_pattern, m) and m != meeg.name and _get_group(m, combine_groups,
-                                                                                               meeg.ct) is not None]
+        other_meegs = [
+            m
+            for m in meeg.pr.all_meeg
+            if re.match(sub_name + first_pattern, m)
+            and m != meeg.name
+            and _get_group(m, combine_groups, meeg.ct) is not None
+        ]
         other_meegs += [new_high_name, new_low_name]
 
         for other_meeg_name in other_meegs:
@@ -2453,8 +2707,13 @@ def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
         "Insula-post-lh": "Ins. post.",
     }
     ncols = len(ct.pr.sel_groups) // 2
-    fig, axes = plt.subplots(2, ncols, figsize=(ncols * 3, 2 * 3), facecolor="white",
-                             subplot_kw={'projection': 'polar'})
+    fig, axes = plt.subplots(
+        2,
+        ncols,
+        figsize=(ncols * 3, 2 * 3),
+        facecolor="white",
+        subplot_kw={"projection": "polar"},
+    )
     axes = axes.flatten()
     datas = dict()
     for gidx, group_name in enumerate(ct.pr.sel_groups):
@@ -2469,9 +2728,7 @@ def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
     vmax_data = np.max(values)
 
     for idx, (group_name, con_data) in enumerate(datas.items()):
-        node_angles = circular_layout(
-            label_names, label_names, start_pos=90
-        )
+        node_angles = circular_layout(label_names, label_names, start_pos=90)
         vmin = vmin_data
         vmax = vmax_data
         plot_connectivity_circle(
@@ -2489,7 +2746,7 @@ def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
             vmax=vmax,
             facecolor="white",
             textcolor="black",
-            colormap="plasma"
+            colormap="plasma",
         )
     fig.tight_layout()
     fig.show()
@@ -2509,7 +2766,7 @@ def create_source_insets(ct, target_labels, label_colors):
             subjects_dir=fsmri.subjects_dir,
             views="lateral",
             background="white",
-            size=(400, 300)
+            size=(400, 300),
         )
         brain.show_view("lateral", distance=300)
         labels = fsmri.get_labels(target_labels)
@@ -2546,3 +2803,64 @@ def plot_author_alignment(ct):
                 src=src,
                 bem=bem,
             )
+
+
+def plot_resolution_metrics(ct, show_plots):
+    from mne.minimum_norm import make_inverse_resolution_matrix, resolution_metrics
+
+    all_ple = None
+    all_sd = None
+
+    group = Group("all", ct)
+    err_counter = 0
+
+    for meeg_name in ct.pr.all_meeg:
+        meeg = MEEG(meeg_name, ct)
+        fwd = meeg.load_forward()
+        fwd = mne.convert_forward_solution(fwd, surf_ori=True, force_fixed=True)
+        info = meeg.load_info()
+        noise_cov = meeg.load_noise_covariance()
+        inv = mne.minimum_norm.make_inverse_operator(
+            info=info, forward=fwd, noise_cov=noise_cov, loose=0.0,
+            depth=None
+        )
+
+        rm_mne = make_inverse_resolution_matrix(
+            fwd, inv, method="dSPM", lambda2=1.0 / 3.0**2
+        )
+        ple_mne_psf = resolution_metrics(
+            rm_mne, inv["src"], function="psf", metric="peak_err"
+        )
+        sd_mne_psf = resolution_metrics(
+            rm_mne, inv["src"], function="psf", metric="sd_ext"
+        )
+        if all_ple is None:
+            all_ple = ple_mne_psf
+            all_sd = sd_mne_psf
+        else:
+            try:
+                all_ple += ple_mne_psf
+                all_sd += sd_mne_psf
+            except ValueError:
+                print(f"Could not add {meeg_name}")
+    all_ple /= len(ct.pr.all_meeg)
+    all_sd /= len(ct.pr.all_meeg)
+
+    ple_fig = all_ple.plot(
+        subject="fsaverage",
+        hemi="lh",
+        views="lat",
+        colorbar=True,
+    )
+    ple_fig.add_text(0.1, 0.9, "Peak Localization Error", "title", font_size=16)
+    group.plot_save("point_spread_ple", brain=ple_fig)
+    sd_fig = all_sd.plot(
+        subject="fsaverage",
+        hemi="lh",
+        views="lat",
+        colorbar=True,
+    )
+    sd_fig.add_text(0.1, 0.9, "Spatial Deviation", "title", font_size=16)
+    group.plot_save("point_spread_sd", brain=sd_fig)
+
+    print(f"Error counter: {err_counter}")
