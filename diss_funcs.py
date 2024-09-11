@@ -2805,62 +2805,80 @@ def plot_author_alignment(ct):
             )
 
 
-def plot_resolution_metrics(ct, show_plots):
-    from mne.minimum_norm import make_inverse_resolution_matrix, resolution_metrics
-
-    all_ple = None
-    all_sd = None
-
-    group = Group("all", ct)
-    err_counter = 0
-
-    for meeg_name in ct.pr.all_meeg:
-        meeg = MEEG(meeg_name, ct)
-        fwd = meeg.load_forward()
-        fwd = mne.convert_forward_solution(fwd, surf_ori=True, force_fixed=True)
-        info = meeg.load_info()
-        noise_cov = meeg.load_noise_covariance()
-        inv = mne.minimum_norm.make_inverse_operator(
-            info=info, forward=fwd, noise_cov=noise_cov, loose=0.0,
-            depth=None
-        )
-
-        rm_mne = make_inverse_resolution_matrix(
-            fwd, inv, method="dSPM", lambda2=1.0 / 3.0**2
-        )
-        ple_mne_psf = resolution_metrics(
-            rm_mne, inv["src"], function="psf", metric="peak_err"
-        )
-        sd_mne_psf = resolution_metrics(
-            rm_mne, inv["src"], function="psf", metric="sd_ext"
-        )
-        if all_ple is None:
-            all_ple = ple_mne_psf
-            all_sd = sd_mne_psf
-        else:
-            try:
-                all_ple += ple_mne_psf
-                all_sd += sd_mne_psf
-            except ValueError:
-                print(f"Could not add {meeg_name}")
-    all_ple /= len(ct.pr.all_meeg)
-    all_sd /= len(ct.pr.all_meeg)
-
-    ple_fig = all_ple.plot(
-        subject="fsaverage",
-        hemi="lh",
-        views="lat",
-        colorbar=True,
+def plot_resolution_metrics(meeg, rm_labels, rm_mode, rm_norm, label_colors, inverse_method):
+    from mne.minimum_norm import (
+        make_inverse_resolution_matrix,
+        get_cross_talk,
+        get_point_spread,
     )
-    ple_fig.add_text(0.1, 0.9, "Peak Localization Error", "title", font_size=16)
-    group.plot_save("point_spread_ple", brain=ple_fig)
-    sd_fig = all_sd.plot(
-        subject="fsaverage",
-        hemi="lh",
-        views="lat",
-        colorbar=True,
-    )
-    sd_fig.add_text(0.1, 0.9, "Spatial Deviation", "title", font_size=16)
-    group.plot_save("point_spread_sd", brain=sd_fig)
 
-    print(f"Error counter: {err_counter}")
+    # Check if rm_labels are selected
+    if rm_labels is None or len(rm_labels) == 0:
+        raise ValueError("No labels selected for resolution matrix calculation.")
+
+    fwd = meeg.load_forward()
+    fwd = mne.convert_forward_solution(fwd, surf_ori=True, force_fixed=True)
+    info = meeg.load_info()
+    noise_cov = meeg.load_noise_covariance()
+    inv = mne.minimum_norm.make_inverse_operator(
+        info=info, forward=fwd, noise_cov=noise_cov, loose=0.0, depth=None
+    )
+
+    rm = make_inverse_resolution_matrix(
+        fwd, inv, method=inverse_method, lambda2=1.0 / 3.0**2
+    )
+
+    # Load label
+    labels = meeg.fsmri.get_labels(target_labels=rm_labels)
+
+    stcs_psf = get_point_spread(rm, fwd["src"], labels, mode=rm_mode, norm=rm_norm)
+    if not isinstance(stcs_psf, list):
+        stcs_psf = [stcs_psf]
+    for stc_psf, rm_label in zip(stcs_psf, labels):
+        color = label_colors.get(rm_label.name)
+        if color is None:
+            color = rm_label.color
+        brain_psf = stc_psf.plot(
+            meeg.fsmri.name,
+            "inflated",
+            "lh",
+            subjects_dir=meeg.fsmri.subjects_dir,
+            background="white",
+            time_viewer=False,
+            colorbar=False,
+        )
+        brain_psf.add_label(rm_label, borders=True, color=color)
+        brain_psf.add_text(
+            x=0.05,
+            y=0.05,
+            text=f"Point-Spread-Function {rm_label.name}",
+            color="black",
+            font_size=16,
+        )
+        meeg.plot_save("psf", trial=rm_label.name, brain=brain_psf)
+
+    stcs_ctf = get_cross_talk(rm, fwd["src"], labels, mode=rm_mode, norm=rm_norm)
+    if not isinstance(stcs_ctf, list):
+        stcs_ctf = [stcs_ctf]
+    for stc_ctf, rm_label in zip(stcs_ctf, labels):
+        color = label_colors.get(rm_label.name)
+        if color is None:
+            color = rm_label.color
+        brain_ctf = stc_ctf.plot(
+            meeg.fsmri.name,
+            "inflated",
+            "lh",
+            subjects_dir=meeg.fsmri.subjects_dir,
+            background="white",
+            time_viewer=False,
+            colorbar=False,
+        )
+        brain_ctf.add_label(rm_label, borders=True, color=color)
+        brain_ctf.add_text(
+            x=0.05,
+            y=0.05,
+            text=f"Cross-Talk-Function {rm_label.name}",
+            color="black",
+            font_size=16,
+        )
+        meeg.plot_save("ctf", trial=rm_label.name, brain=brain_ctf)

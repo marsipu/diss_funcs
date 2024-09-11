@@ -31,4 +31,4 @@ plot_all_connectivity;;Other;Plot;Diss;False;True;;diss_funcs;diss_funcs;ct,show
 create_source_insets;;Other;Preparation;Diss;False;True;;diss_funcs;diss_funcs;ct,target_labels,label_colors
 plot_author_alignment;;Other;Plot;Diss;False;True;;diss_funcs;diss_funcs;ct
 plot_rating_combination_test;;MEEG;Plot;Diss;True;False;;diss_funcs;diss_funcs;meeg,show_plots
-plot_resolution_metrics;;Other;Plot;Diss;False;True;;diss_funcs;diss_funcs;ct,show_plots
+plot_resolution_metrics;;MEEG;Plot;Diss;False;True;;diss_funcs;diss_funcs;meeg,rm_labels,rm_mode,rm_norm,label_colors,inverse_method
