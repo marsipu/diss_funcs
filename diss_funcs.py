@@ -48,7 +48,7 @@ lang_dict = {
         "xlabel": "Zeit [s]",
         "volt": "Spannung",
         "mag": "Feldstärke",
-        "source": "dSPM",  # "dSPM" is the abbreviation for "dynamic Statistical Parametric Mapping"
+        "source": "dSPM [z-Wert]",  # "dSPM" is the abbreviation for "dynamic Statistical Parametric Mapping"
         "columns": ["Vergleich", "Kanaltyp", "Zeit", "p-Wert"],
         "caption": "Signifikante Cluster der Cluster--Permutationstests. p--Werte sind Bonferroni--korrigiert.",
     },
@@ -56,7 +56,7 @@ lang_dict = {
         "xlabel": "Time [s]",
         "volt": "Voltage",
         "mag": "Field strength",
-        "source": "dSPM",  # "dSPM" is the abbreviation for "dynamic Statistical Parametric Mapping"
+        "source": "dSPM [z-value]",  # "dSPM" is the abbreviation for "dynamic Statistical Parametric Mapping"
         "columns": ["Comparison", "Channel type", "Time", "p-value"],
         "caption": "Significant clusters of the cluster-permutation-tests. p-values are Bonferroni-corrected.",
     },
@@ -906,7 +906,7 @@ def _mean_of_different_lengths(data):
 def plot_ratings_combined(ct, rating_groups, group_colors, show_plots):
     """The Ratings of all groups are plotted together."""
     x = "Probanden"
-    y = "Rating"
+    y = "Rating [a.u.]"
     hue = "Stimulation"
     plt.rcParams.update({"font.size": fontsize})
     fig, axes = plt.subplots(2, 1, figsize=(figwidth, 6))
@@ -2206,7 +2206,7 @@ def connectivity_geodesic_statistics(
 
     freq_pairs = list(zip(con_fmin, con_fmax))
     x = "Vergleichsgruppen"
-    y = "Geodätische Distanz"
+    y = "Geodätische Distanz [a.u.]"
     plt.rcParams.update({"font.size": fontsize})
     fig, axes = plt.subplots(
         nrows=len(freq_pairs),
