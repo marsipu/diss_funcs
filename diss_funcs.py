@@ -1997,7 +1997,8 @@ def plot_label_power(
                 vmax=1,
             )
     for ax in axes[:, -1]:
-        fig.colorbar(im, ax=ax)
+        cb = fig.colorbar(im, ax=ax)
+        cb.set_label("z-score [a.u.]", rotation=270, labelpad=15)
 
     xtitles = {gp: group_colors[gp] for gp in ct.pr.sel_groups}
     ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
@@ -2136,7 +2137,8 @@ def label_power_cond_permclust(
             )
             ims.append(im_sig)
     for ax in axes[:, -1]:
-        fig.colorbar(im_sig, ax=ax)
+        cb = fig.colorbar(im_sig, ax=ax)
+        cb.set_label("difference of z-score [a.u.]", rotation=270, labelpad=15)
     xtitles = {"-".join(gn): "k" for gn in compare_groups}
     ytitles = {label_alias[lb]: label_colors[lb] for lb in target_labels}
     xlabel = "Zeit [s]"
@@ -2415,16 +2417,22 @@ def add_velo_meta(meeg):
 
 
 def plot_velo_evoked(group, show_plots):
-    evs = list()
+    fig, ax = plt.subplots(figsize=(figwidth, figwidth*0.75))
     for evokeds, meeg in group.load_items(data_type="evoked"):
         evo = evokeds[0]
-        evo.comment = f"{meeg.name[-2:]} mm/s"
-        evs.append(evo)
-    evs = mne.equalize_channels(evs)
-    fig = mne.viz.plot_compare_evokeds(
-        evs, title="Vergleich vertikale Geschwindigkeiten", show=show_plots
-    )
+        evo.filter(l_freq=0.1, h_freq=15)
+        gfp = calculate_gfp(evo)["grad"]
+        factor, unit = _convert_units(np.min(gfp), "T/cm")
+        ax.plot(evo.times, gfp*factor, label=f"{meeg.name[-2:]} mm/s")
+    ax.set_xlabel("Zeit [s]")
+    ax.set_ylabel(f"Feldstärke [{unit}]")
+    ax.legend()
+    ax.axvline(x=0, color="k", linestyle="--")
+    fig.suptitle("Vergleich vertikaler Geschwindigkeiten (GFP)")
+    fig.tight_layout()
     group.plot_save("velo_comparision", matplotlib_figure=fig)
+    if show_plots:
+        fig.show()
 
 
 def _get_group(meeg_name, groups, ct):
@@ -2731,7 +2739,7 @@ def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
         node_angles = circular_layout(label_names, label_names, start_pos=90)
         vmin = vmin_data
         vmax = vmax_data
-        plot_connectivity_circle(
+        con_fig, con_ax = plot_connectivity_circle(
             con_data,
             label_names,
             node_angles=node_angles,
@@ -2748,6 +2756,8 @@ def plot_all_connectivity(ct, label_colors, cluster_trial, show_plots):
             textcolor="black",
             colormap="plasma",
         )
+        cm = axes[idx].images[0].colorbar
+        cm.set_label("Connectivity [a.u.]", rotation=270, labelpad=15)
     fig.tight_layout()
     fig.show()
 
