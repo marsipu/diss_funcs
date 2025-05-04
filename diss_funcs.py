@@ -2,6 +2,7 @@ import itertools
 import re
 import sys
 from collections import OrderedDict
+from copy import deepcopy
 from functools import reduce, partial
 from itertools import combinations
 from os import mkdir
@@ -1193,6 +1194,24 @@ def plot_ratings_ltc_comparision(
                 group_data = list()
                 for query_trial, query_data in ltc_dict.items():
                     group_data.append(np.asarray(list(query_data[label_name].values())))
+
+                # Get group mean and sd for post-hoc gpower calculation
+                if col_idx == 2:
+                    copy_data = deepcopy(group_data)
+                    group1 = list()
+                    for arr in copy_data[0]:
+                        group1.append(arr[1136])
+                    group2 = list()
+                    for arr in copy_data[1]:
+                        group2.append(arr[1136])
+                    mean1 = np.mean(group1)
+                    mean2 = np.mean(group2)
+                    sd1 = np.std(group1)
+                    sd2 = np.std(group2)
+                    print("#######################################################")
+                    print(f"Mean1: {mean1}, SD1: {sd1}")
+                    print(f"Mean2: {mean2}, SD2: {sd2}")
+                    print("#######################################################")
 
                 factor, unit = _convert_units(np.min(group_data), "")
 
